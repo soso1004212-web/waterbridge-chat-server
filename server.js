@@ -6,46 +6,81 @@ const { Server } = require("socket.io");
 const app = express();
 const server = http.createServer(app);
 
-console.log("BOOT START");
-console.log("BOT:", !!process.env.BOT_TOKEN);
-console.log("CHAT:", !!process.env.CHAT_ID);
 const PORT = process.env.PORT || 3000;
 
-// 🔐 ENV 체크 (임시 주석 테스트 가능)
-const BOT_TOKEN = process.env.BOT_TOKEN;
-const CHAT_ID = process.env.CHAT_ID;
-
-const allowedOrigins = [
-  "http://www.waterbridgepartners.kr",
-  "https://www.waterbridgepartners.kr"
-];
-
-// ================= CORS =================
 app.use(cors({
-  origin: allowedOrigins,
+  origin: [
+    "http://www.waterbridgepartners.kr",
+    "https://www.waterbridgepartners.kr"
+  ],
   methods: ["GET", "POST", "OPTIONS"],
   credentials: true
 }));
 
 app.use(express.json());
 
-// ❌ 이거 절대 넣지 마
-// app.options("*", cors());  ← 삭제
-
 // ================= SOCKET =================
 const io = new Server(server, {
   cors: {
-    origin: allowedOrigins,
+    origin: "*",
     methods: ["GET", "POST"]
   }
 });
 
-// ================= HEALTH =================
-app.get("/", (req, res) => {
-  res.send("OK");
+// ================= ROOM JOIN =================
+io.on("connection", (socket) => {
+
+  console.log("USER CONNECT:", socket.id);
+
+  socket.on("join", (sessionId) => {
+    socket.join(sessionId);
+    console.log("JOIN ROOM:", sessionId);
+  });
+
+  socket.on("disconnect", () => {
+    console.log("DISCONNECT:", socket.id);
+  });
 });
 
-// ================= START =================
+// ================= USER → ADMIN =================
+app.post("/send", (req, res) => {
+  const { message, sessionId } = req.body;
+
+  if (!message || !sessionId) {
+    return res.status(400).json({ error: "invalid" });
+  }
+
+  console.log("USER MSG:", sessionId, message);
+
+  // 👉 Telegram 보내기 (옵션)
+  // axios.post(...)
+
+  res.json({ success: true });
+});
+
+// ================= ADMIN → USER =================
+app.post("/reply", (req, res) => {
+  const { sessionId, text } = req.body;
+
+  if (!sessionId || !text) {
+    return res.status(400).json({ error: "invalid" });
+  }
+
+  console.log("ADMIN REPLY:", sessionId, text);
+
+  // 🔥 핵심: 특정 사용자에게 즉시 전달
+  io.to(sessionId).emit("reply", {
+    text
+  });
+
+  res.json({ success: true });
+});
+
+// ================= HEALTH =================
+app.get("/", (req, res) => {
+  res.send("OK - Live Chat Running");
+});
+
 server.listen(PORT, "0.0.0.0", () => {
-  console.log("Server running on", PORT);
+  console.log("RUNNING ON", PORT);
 });
