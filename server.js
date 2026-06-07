@@ -1,133 +1,114 @@
 require("dotenv").config();
-
 const express = require("express");
 const http = require("http");
 const cors = require("cors");
 const { Server } = require("socket.io");
+const mongoose = require("mongoose");
 const crypto = require("crypto");
-const path = require("path");
 
 const app = express();
 const server = http.createServer(app);
 
-const PORT = process.env.PORT || 3000;
-
-/* ================= CORS ================= */
-const allowedOrigins = [
-  "http://www.waterbridgepartners.kr",
-  "https://www.waterbridgepartners.kr"
-];
-
-app.use(cors({
-  origin: allowedOrigins,
-  methods: ["GET", "POST"]
-}));
-
+app.use(cors({ origin: "*" }));
 app.use(express.json());
-app.use(express.static(path.join(__dirname, "public")));
 
-/* ================= SOCKET ================= */
 const io = new Server(server, {
-  cors: { origin: allowedOrigins }
+  cors: { origin: "*" }
 });
 
-/* ================= MEMORY DB ================= */
-const sessions = new Map(); // sessionId -> messages
-const agents = new Map();   // admin socket
+/* ================= DB ================= */
+mongoose.connect(process.env.MONGO_URL);
 
-/* ================= UTIL ================= */
-function aiReply(text) {
-  text = text.toLowerCase();
+const Message = mongoose.model("Message", new mongoose.Schema({
+  sessionId: String,
+  from: String,
+  text: String,
+  createdAt: { type: Date, default: Date.now }
+}));
 
-  if (text.includes("m&a")) return "M&A 전문 상담 가능합니다.";
-  if (text.includes("투자")) return "투자유치/IR 상담 가능합니다.";
-  if (text.includes("비용")) return "프로젝트별로 상이합니다.";
-  if (text.includes("시간")) return "상담시간은 09:00~18:00 입니다.";
+const Session = mongoose.model("Session", new mongoose.Schema({
+  sessionId: String,
+  status: { type: String, default: "open" },
+  lastMessage: String,
+  updatedAt: { type: Date, default: Date.now }
+}));
 
-  return "전문 상담원이 곧 안내드립니다.";
-}
-
-/* ================= SOCKET CORE ================= */
+/* ================= SOCKET ================= */
 io.on("connection", (socket) => {
 
-  console.log("CONNECT:", socket.id);
-
-  /* ===== 상담원 등록 ===== */
-  socket.on("agent-online", () => {
-    agents.set(socket.id, { status: "online" });
-    socket.join("agents");
-  });
-
-  /* ===== 고객 입장 ===== */
-  socket.on("join", (sessionId) => {
-
+  socket.on("join", async (sessionId) => {
     socket.join(sessionId);
-
-    if (!sessions.has(sessionId)) {
-      sessions.set(sessionId, []);
-    }
-
-    io.to(sessionId).emit("status", { status: "online" });
-
-    io.to("agents").emit("new-session", { sessionId });
   });
 
-  /* ===== 메시지 ===== */
-  socket.on("message", (data) => {
+  socket.on("message", async (data) => {
 
     const { sessionId, text, from } = data;
 
-    const msg = {
-      id: crypto.randomUUID(),
+    const msg = await Message.create({
       sessionId,
-      text,
       from,
-      time: Date.now()
-    };
+      text
+    });
 
-    if (!sessions.has(sessionId)) {
-      sessions.set(sessionId, []);
-    }
-
-    sessions.get(sessionId).push(msg);
+    await Session.findOneAndUpdate(
+      { sessionId },
+      { sessionId, lastMessage: text, updatedAt: new Date() },
+      { upsert: true }
+    );
 
     io.to(sessionId).emit("message", msg);
 
-    /* ===== AI (user만) ===== */
+    /* ================= AI ================= */
     if (from === "user") {
+      setTimeout(async () => {
 
-      setTimeout(() => {
+        const aiText = aiEngine(text);
 
-        const bot = {
-          id: crypto.randomUUID(),
+        const aiMsg = await Message.create({
           sessionId,
-          text: aiReply(text),
           from: "bot",
-          time: Date.now()
-        };
+          text: aiText
+        });
 
-        sessions.get(sessionId).push(bot);
-        io.to(sessionId).emit("message", bot);
+        io.to(sessionId).emit("message", aiMsg);
 
-      }, 600);
+      }, 800);
     }
   });
 
-  socket.on("disconnect", () => {
-    agents.delete(socket.id);
-  });
 });
+
+/* ================= AI ENGINE ================= */
+function aiEngine(text) {
+
+  text = text.toLowerCase();
+
+  if (text.includes("m&a")) return "M&A 전문 상담 가능합니다.";
+  if (text.includes("투자")) return "투자유치 상담 가능합니다.";
+  if (text.includes("비용")) return "프로젝트별 상이합니다.";
+  if (text.includes("시간")) return "09:00~18:00 운영됩니다.";
+
+  return "담당 상담원이 곧 연결됩니다.";
+}
 
 /* ================= API ================= */
-app.get("/messages/:sessionId", (req, res) => {
-  res.json(sessions.get(req.params.sessionId) || []);
+app.get("/sessions", async (req, res) => {
+  const list = await Session.find().sort({ updatedAt: -1 });
+  res.json(list);
 });
 
-app.get("/sessions", (req, res) => {
-  res.json(Array.from(sessions.keys()));
+app.get("/messages/:sessionId", async (req, res) => {
+  const msgs = await Message.find({ sessionId: req.params.sessionId });
+  res.json(msgs);
+});
+
+app.post("/close", async (req, res) => {
+  const { sessionId } = req.body;
+  await Session.updateOne({ sessionId }, { status: "closed" });
+  res.json({ ok: true });
 });
 
 /* ================= START ================= */
-server.listen(PORT, () => {
-  console.log("🚀 SERVER RUNNING:", PORT);
+server.listen(3000, () => {
+  console.log("🚀 SaaS Chat Server Running");
 });
