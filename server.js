@@ -98,9 +98,6 @@ io.on("connection", (socket) => {
 
 });
 
-app.get("/", (req, res) => {
-  res.send("WaterBridge Chat Server Running");
-});
 const PORT = process.env.PORT || 3000;
 
 server.listen(PORT, () => {
