@@ -98,9 +98,11 @@ io.on("connection", (socket) => {
 
 });
 
-server.listen(3000, () => {
+app.get("/", (req, res) => {
+  res.send("WaterBridge Chat Server Running");
+});
+const PORT = process.env.PORT || 3000;
 
-  console.log("서버 실행중");
-  console.log("http://localhost:3000");
-
+server.listen(PORT, () => {
+  console.log(`서버 실행중 ${PORT}`);
 });
