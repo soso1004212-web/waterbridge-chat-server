@@ -17,11 +17,6 @@ const BOT_TOKEN = process.env.BOT_TOKEN;
 const CHAT_ID = process.env.CHAT_ID;
 
 /* ================= CORS ================= */
-const allowedOrigins = [
-  "http://www.waterbridgepartners.kr",
-  "https://www.waterbridgepartners.kr"
-];
-
 app.use(cors({
   origin: allowedOrigins,
   methods: ["GET", "POST"],
@@ -29,6 +24,15 @@ app.use(cors({
 }));
 
 app.use(express.json());
+
+/* ================= ADMIN PAGE (여기 넣어) ================= */
+const path = require("path");
+
+app.use(express.static("public"));
+
+app.get("/admin", (req, res) => {
+  res.sendFile(path.join(__dirname, "admin.html"));
+});
 
 /* ================= SOCKET ================= */
 const io = new Server(server, {
