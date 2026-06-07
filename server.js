@@ -56,32 +56,40 @@ io.on("connection", (socket) => {
 
 // ================= USER → SERVER → TELEGRAM =================
 app.post("/send", async (req, res) => {
+
+  console.log("🔥 SEND HIT");
+
   const { message, sessionId } = req.body;
+
+  console.log("BODY:", req.body);
 
   if (!message || !sessionId) {
     return res.status(400).json({ error: "invalid" });
   }
 
-  console.log("USER MSG:", sessionId, message);
-
-  // 🔥 Telegram 전송
   try {
-    if (BOT_TOKEN && CHAT_ID) {
-      await axios.post(
-        `https://api.telegram.org/bot${BOT_TOKEN}/sendMessage`,
+    if (process.env.BOT_TOKEN && process.env.CHAT_ID) {
+
+      const result = await axios.post(
+        `https://api.telegram.org/bot${process.env.BOT_TOKEN}/sendMessage`,
         {
-          chat_id: CHAT_ID,
+          chat_id: process.env.CHAT_ID,
           text: `📩 상담 요청\n\nID: ${sessionId}\n내용:\n${message}`
         }
       );
 
-      console.log("✅ TELEGRAM SENT");
+      console.log("✅ TELEGRAM OK");
+      console.log(result.data);
+
+    } else {
+      console.log("❌ ENV MISSING");
     }
+
   } catch (err) {
-    console.log("❌ TELEGRAM ERROR:", err.message);
+    console.log("❌ TELEGRAM FAIL:", err.response?.data || err.message);
   }
 
-  res.json({ success: true });
+  res.json({ ok: true });
 });
 
 // ================= ADMIN → USER =================
