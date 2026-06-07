@@ -12,31 +12,72 @@ body { margin:0; display:flex; height:100vh; background:#0f0f0f; color:white; }
 #left { width:300px; background:#1a1a1a; overflow:auto; }
 #right { flex:1; display:flex; flex-direction:column; }
 
-.session { padding:10px; border-bottom:1px solid #333; cursor:pointer; }
+.session {
+  padding:10px;
+  border-bottom:1px solid #333;
+  cursor:pointer;
+  display:flex;
+  justify-content:space-between;
+  align-items:center;
+}
 .session:hover { background:#222; }
 .session.active { background:#333; }
 
+.badge {
+  font-size:12px;
+  padding:2px 6px;
+  border-radius:10px;
+  background:red;
+  color:white;
+}
+
+.vip {
+  background:#d4af37;
+  color:black;
+}
+
 #chat { flex:1; padding:15px; overflow:auto; }
 
-.msg { margin:8px 0; padding:8px; border-radius:6px; max-width:70%; }
+.msg {
+  margin:8px 0;
+  padding:8px;
+  border-radius:6px;
+  max-width:70%;
+}
+
 .user { background:#2a2a2a; }
 .admin { background:#d4af37; color:black; margin-left:auto; }
 .bot { background:#444; }
 
 #input { display:flex; padding:10px; }
+
 input { flex:1; padding:10px; }
 button { padding:10px; }
+
+#topbar {
+  padding:10px;
+  display:flex;
+  gap:10px;
+  border-bottom:1px solid #333;
+}
 </style>
 </head>
 
 <body>
 
 <div id="left">
-  <h3>상담목록</h3>
+  <h3 style="padding:10px;">상담목록</h3>
   <div id="list"></div>
 </div>
 
 <div id="right">
+
+  <div id="topbar">
+    <button onclick="endSession()" style="background:red;color:white;">
+      상담 종료
+    </button>
+  </div>
+
   <div id="chat"></div>
 
   <div id="input">
@@ -49,53 +90,120 @@ button { padding:10px; }
 const socket = io("https://waterbridge-chat-server-production.up.railway.app");
 
 let current = null;
-const sessions = {};
+
+const sessions = new Map();   // sessionId → messages
+const meta = new Map();       // sessionId → { unread, vip }
+
+const sessionSet = new Set();
 
 const list = document.getElementById("list");
 const chat = document.getElementById("chat");
 
 socket.emit("agent-online");
 
-/* 실시간 */
+
+// ==========================
+// 메시지 수신
+// ==========================
 socket.on("message", (data) => {
 
-  if (!sessions[data.sessionId]) {
-    sessions[data.sessionId] = [];
-    addSession(data.sessionId);
+  const { sessionId } = data;
+
+  if (!sessions.has(sessionId)) {
+    sessions.set(sessionId, []);
+    meta.set(sessionId, { unread: 0, vip: false });
+    addSession(sessionId);
   }
 
-  sessions[data.sessionId].push(data);
+  // 메시지 저장
+  sessions.get(sessionId).push(data);
 
-  if (current === data.sessionId) render(data.sessionId);
+  // 안읽음 증가
+  if (sessionId !== current) {
+    meta.get(sessionId).unread++;
+  }
+
+  // VIP 체크 (서버에서 주면 더 좋지만 프론트도 보조)
+  if (data.text?.includes("VIP") || data.text?.includes("대기업")) {
+    meta.get(sessionId).vip = true;
+  }
+
+  updateSessionUI(sessionId);
+
+  if (current === sessionId) {
+    render(sessionId);
+  }
 });
 
-/* 세션 추가 */
+
+// ==========================
+// 세션 추가
+// ==========================
 function addSession(id) {
+
+  if (sessionSet.has(id)) return;
+  sessionSet.add(id);
+
   const div = document.createElement("div");
   div.className = "session";
-  div.innerText = id;
+  div.dataset.id = id;
 
   div.onclick = () => {
     current = id;
+    meta.get(id).unread = 0;
+    updateSessionUI(id);
     render(id);
   };
 
   list.appendChild(div);
+
+  updateSessionUI(id);
 }
 
-/* 렌더 */
+
+// ==========================
+// UI 업데이트 (VIP + 안읽음)
+// ==========================
+function updateSessionUI(id) {
+
+  const el = [...document.querySelectorAll(".session")]
+    .find(e => e.dataset.id === id);
+
+  if (!el) return;
+
+  const m = meta.get(id);
+
+  el.innerHTML = `
+    <span>
+      ${m.vip ? "🔥 VIP " : ""}${id}
+    </span>
+    <span class="badge ${m.vip ? "vip" : ""}">
+      ● ${m.unread}
+    </span>
+  `;
+}
+
+
+// ==========================
+// 채팅 렌더
+// ==========================
 function render(id) {
+
   chat.innerHTML = "";
 
-  (sessions[id] || []).forEach(m => {
+  const messages = sessions.get(id) || [];
+
+  messages.forEach(m => {
 
     const div = document.createElement("div");
 
     div.className =
-      "msg " + (m.from === "admin" ? "admin" :
-                m.from === "bot" ? "bot" : "user");
+      "msg " + (
+        m.from === "admin" ? "admin" :
+        m.from === "bot" ? "bot" : "user"
+      );
 
-    div.innerText = (m.from + ": " + m.text);
+    div.innerText = `${m.from}: ${m.text}`;
 
     chat.appendChild(div);
   });
@@ -103,18 +211,57 @@ function render(id) {
   chat.scrollTop = chat.scrollHeight;
 }
 
-/* 답장 */
+
+// ==========================
+// 답장 전송
+// ==========================
 function send() {
 
-  const text = document.getElementById("msg").value;
+  const input = document.getElementById("msg");
+  const text = input.value.trim();
+
+  if (!text) return;
+
+  if (!current) {
+    alert("상담 세션을 선택하세요.");
+    return;
+  }
 
   fetch("https://waterbridge-chat-server-production.up.railway.app/reply", {
-    method:"POST",
-    headers:{ "Content-Type":"application/json" },
-    body: JSON.stringify({ sessionId: current, text })
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      sessionId: current,
+      text
+    })
   });
 
-  document.getElementById("msg").value = "";
+  input.value = "";
+}
+
+
+// ==========================
+// 상담 종료 + 기록 저장
+// ==========================
+function endSession() {
+
+  if (!current) return;
+
+  fetch("https://waterbridge-chat-server-production.up.railway.app/end", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      sessionId: current
+    })
+  });
+
+  sessions.delete(current);
+  meta.delete(current);
+
+  document.querySelector(`[data-id="${current}"]`)?.remove();
+
+  chat.innerHTML = "";
+  current = null;
 }
 </script>
 
