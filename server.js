@@ -3,7 +3,6 @@ require("dotenv").config();
 const express = require("express");
 const cors = require("cors");
 const http = require("http");
-const axios = require("axios");
 const { Server } = require("socket.io");
 const crypto = require("crypto");
 const path = require("path");
@@ -12,10 +11,6 @@ const app = express();
 const server = http.createServer(app);
 
 const PORT = process.env.PORT || 3000;
-
-/* ================= ENV ================= */
-const BOT_TOKEN = process.env.BOT_TOKEN;
-const CHAT_ID = process.env.CHAT_ID;
 
 /* ================= CORS ================= */
 const allowedOrigins = [
@@ -30,24 +25,16 @@ app.use(cors({
 }));
 
 app.use(express.json());
-
-/* ================= STATIC FILE ================= */
-// public 폴더 사용 (권장)
 app.use(express.static(path.join(__dirname, "public")));
-
-/* ================= ADMIN PAGE ================= */
-app.get("/admin", (req, res) => {
-  res.sendFile(path.join(__dirname, "public", "admin.html"));
-});
 
 /* ================= SOCKET ================= */
 const io = new Server(server, {
   cors: { origin: allowedOrigins }
 });
 
-/* ================= DB ================= */
-const sessions = new Map();
-const agents = new Map();
+/* ================= MEMORY DB ================= */
+const sessions = new Map();   // sessionId -> messages[]
+const agents = new Map();     // socketId -> agent info
 
 /* ================= UTIL ================= */
 function getLeastBusyAgent() {
@@ -56,6 +43,7 @@ function getLeastBusyAgent() {
 
   for (const [id, agent] of agents.entries()) {
     if (agent.status !== "online") continue;
+
     if (agent.sessions < min) {
       min = agent.sessions;
       best = id;
@@ -70,13 +58,17 @@ io.on("connection", (socket) => {
 
   console.log("CONNECT:", socket.id);
 
+  // 상담원 등록
   socket.on("agent-online", () => {
     agents.set(socket.id, {
       status: "online",
       sessions: 0
     });
+
+    socket.join("agents");
   });
 
+  // 고객 입장
   socket.on("join", (sessionId) => {
 
     socket.join(sessionId);
@@ -96,99 +88,97 @@ io.on("connection", (socket) => {
     }
 
     io.to(sessionId).emit("status", {
-      sessionId,
       status: "online"
     });
   });
 
+  // 메시지 전달 (실시간 핵심)
+  socket.on("message", (msg) => {
+
+    const { sessionId, text, from } = msg;
+
+    const data = {
+      id: crypto.randomUUID(),
+      sessionId,
+      text,
+      from,
+      time: Date.now()
+    };
+
+    if (!sessions.has(sessionId)) {
+      sessions.set(sessionId, []);
+    }
+
+    sessions.get(sessionId).push(data);
+
+    io.to(sessionId).emit("message", data);
+
+    // 🔥 AI 자동응답 (상담원 없을 때만)
+    if (from === "user") {
+
+      setTimeout(() => {
+
+        const ai = {
+          id: crypto.randomUUID(),
+          sessionId,
+          from: "bot",
+          text: autoAI(text),
+          time: Date.now()
+        };
+
+        sessions.get(sessionId).push(ai);
+        io.to(sessionId).emit("message", ai);
+
+      }, 700);
+    }
+  });
+
+  // 상담원 disconnect
   socket.on("disconnect", () => {
-    agents.delete(socket.id);
+    if (agents.has(socket.id)) {
+      agents.delete(socket.id);
+    }
+
+    console.log("DISCONNECT:", socket.id);
   });
 });
 
-/* ================= USER SEND ================= */
-app.post("/send", async (req, res) => {
+/* ================= AI ================= */
+function autoAI(text) {
 
-  const { message, sessionId } = req.body;
+  text = text.toLowerCase();
 
-  const msg = {
-    id: crypto.randomUUID(),
-    from: "user",
-    text: message,
-    sessionId,
-    time: Date.now(),
-    read: false
-  };
+  if (text.includes("m&a")) return "M&A 전문 상담 가능합니다.";
+  if (text.includes("투자")) return "투자유치/IR 상담 가능합니다.";
+  if (text.includes("비용")) return "프로젝트별로 상이합니다.";
+  if (text.includes("시간")) return "상담시간은 09:00~18:00 입니다.";
 
-  if (!sessions.has(sessionId)) {
-    sessions.set(sessionId, []);
-  }
+  return "전문 상담원이 곧 안내드립니다.";
+}
 
-  sessions.get(sessionId).push(msg);
+/* ================= ADMIN API ================= */
 
-  io.to(sessionId).emit("message", msg);
-
-  /* AI 자동응답 */
-  let aiText = null;
-
-  if (message.includes("시간")) aiText = "상담시간은 09:00~18:00 입니다.";
-  if (message.includes("대출")) aiText = "담당자가 곧 연결됩니다.";
-
-  if (aiText) {
-    setTimeout(() => {
-
-      const botMsg = {
-        id: crypto.randomUUID(),
-        from: "bot",
-        text: aiText,
-        sessionId,
-        time: Date.now(),
-        read: true
-      };
-
-      sessions.get(sessionId).push(botMsg);
-      io.to(sessionId).emit("message", botMsg);
-
-    }, 800);
-  }
-
-  res.json({ ok: true, id: msg.id });
+// 메시지 히스토리
+app.get("/messages/:sessionId", (req, res) => {
+  res.json(sessions.get(req.params.sessionId) || []);
 });
 
-/* ================= ADMIN REPLY ================= */
+// 세션 목록
+app.get("/sessions", (req, res) => {
+  res.json(Array.from(sessions.keys()));
+});
+
+// 상담원 응답
 app.post("/reply", (req, res) => {
-
-/* ================= END SESSION ================= */
-app.post("/end", (req, res) => {
-
-  const { sessionId } = req.body;
-
-  if (!sessions.has(sessionId)) {
-    return res.json({ ok: false, message: "no session" });
-  }
-
-  const history = sessions.get(sessionId);
-
-  // (선택) 로그 저장
-  console.log("=== SESSION END ===");
-  console.log("ID:", sessionId);
-  console.log("HISTORY:", history);
-
-  // 실제 종료 처리
-  sessions.delete(sessionId);
-
-  res.json({ ok: true });
-});
 
   const { sessionId, text } = req.body;
 
   const msg = {
     id: crypto.randomUUID(),
-    from: "admin",
-    text,
     sessionId,
-    time: Date.now(),
-    read: true
+    text,
+    from: "agent",
+    time: Date.now()
   };
 
   if (!sessions.has(sessionId)) {
@@ -199,19 +189,24 @@ app.post("/end", (req, res) => {
 
   io.to(sessionId).emit("message", msg);
 
-  res.json({ ok: true, id: msg.id });
+  res.json({ ok: true });
 });
 
-/* ================= API ================= */
-app.get("/sessions", (req, res) => {
-  res.json(Array.from(sessions.keys()));
-});
+// 세션 종료
+app.post("/end", (req, res) => {
 
-app.get("/messages/:id", (req, res) => {
-  res.json(sessions.get(req.params.id) || []);
+  const { sessionId } = req.body;
+
+  sessions.delete(sessionId);
+
+  io.to(sessionId).emit("status", {
+    status: "closed"
+  });
+
+  res.json({ ok: true });
 });
 
 /* ================= START ================= */
 server.listen(PORT, "0.0.0.0", () => {
-  console.log("SERVER RUNNING:", PORT);
+  console.log("🚀 CHAT SERVER RUNNING:", PORT);
 });
