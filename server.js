@@ -52,8 +52,8 @@ app.post("/send", (req, res) => {
   // 먼저 응답 (중요)
   res.json({ success: true });
 
-  axios.post(`https://api.telegram.org/bot${BOT_TOKEN}/sendMessage`, {
-    chat_id: CHAT_ID,
+  axios.post(`https://api.telegram.org/bot${8881120675:AAHVuJ7RnhHBhcEVog0wRBzqNDXqvO1ArRE}/sendMessage`, {
+    chat_id: 8643867290,
     text: `📩 새 상담\n\n세션: ${sessionId}\n\n내용:\n${message}`
   }).catch(err => {
     console.log("텔레그램 오류:", err.message);
