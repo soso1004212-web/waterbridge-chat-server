@@ -9,11 +9,15 @@ const server = http.createServer(app);
 
 const io = new Server(server, {
   cors: {
-    origin: "*"
-  }
+    origin: "*",
+    methods: ["GET", "POST"]
+  },
+  transports: ["websocket"]
 });
 
-app.use(cors());
+app.use(cors({
+  origin: "*"
+}));
 app.use(express.json());
 
 const BOT_TOKEN = "8881120675:AAHVuJ7RnhHBhcEVog0wRBzqNDXqvO1ArRE";
@@ -25,50 +29,21 @@ app.get("/", (req, res) => {
 
 app.post("/send", async (req, res) => {
 
+  const { message, sessionId } = req.body;
+
+  // 👉 먼저 응답 (서버 안 멈추게)
+  res.json({ success: true });
+
   try {
-
-    const { message, sessionId } = req.body;
-
-    console.log("============");
-    console.log("새 상담 접수");
-    console.log("세션:", sessionId);
-    console.log("내용:", message);
-    console.log("============");
-
-    const result = await axios.post(
+    await axios.post(
       `https://api.telegram.org/bot${BOT_TOKEN}/sendMessage`,
       {
         chat_id: CHAT_ID,
-        text:
-`📩 새 상담
-
-세션: ${sessionId}
-
-내용:
-${message}`
+        text: `📩 새 상담\n\n세션: ${sessionId}\n\n내용:\n${message}`
       }
     );
-
-    console.log("텔레그램 전송 성공");
-
-    res.json({
-      success: true
-    });
-
   } catch (err) {
-
-    console.log("텔레그램 오류");
-
-    if (err.response) {
-      console.log(err.response.data);
-    } else {
-      console.log(err.message);
-    }
-
-    res.status(500).json({
-      success: false
-    });
-
+    console.log("텔레그램 오류:", err.message);
   }
 
 });
@@ -90,10 +65,10 @@ app.post("/reply", (req, res) => {
 
 io.on("connection", (socket) => {
 
-  console.log("사용자 연결");
+  console.log("🔵 사용자 연결됨:", socket.id);
 
   socket.on("disconnect", () => {
-    console.log("사용자 종료");
+    console.log("🔴 사용자 종료");
   });
 
 });
