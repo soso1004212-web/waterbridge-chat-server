@@ -2,200 +2,119 @@
 <html lang="ko">
 <head>
 <meta charset="UTF-8">
-<title>관리자 상담 페이지</title>
+<title>관리자 콘솔</title>
 
 <script src="https://cdn.socket.io/4.8.1/socket.io.min.js"></script>
 
 <style>
+body { margin:0; display:flex; height:100vh; background:#0f0f0f; color:white; }
 
-@keyframes blink {
-  0% { background:#222; }
-  50% { background:#444; }
-  100% { background:#222; }
-}
-body {
-  font-family: Arial;
-  background: #111;
-  color: white;
-  display: flex;
-}
+#left { width:300px; background:#1a1a1a; overflow:auto; }
+#right { flex:1; display:flex; flex-direction:column; }
 
-/* 좌측 */
-#left {
-  width: 30%;
-  border-right: 1px solid #333;
-  height: 100vh;
-  overflow-y: auto;
-}
+.session { padding:10px; border-bottom:1px solid #333; cursor:pointer; }
+.session:hover { background:#222; }
+.session.active { background:#333; }
 
-/* 우측 */
-#right {
-  flex: 1;
-  padding: 20px;
-}
+#chat { flex:1; padding:15px; overflow:auto; }
 
-.session {
-  padding: 10px;
-  border-bottom: 1px solid #333;
-  cursor: pointer;
-}
+.msg { margin:8px 0; padding:8px; border-radius:6px; max-width:70%; }
+.user { background:#2a2a2a; }
+.admin { background:#d4af37; color:black; margin-left:auto; }
+.bot { background:#444; }
 
-.session:hover {
-  background: #222;
-}
-
-.session.active {
-  background: #444;
-  font-weight: bold;
-}
-
-.msg {
-  margin: 10px 0;
-}
-
-input {
-  width: 80%;
-  padding: 10px;
-}
-
-button {
-  padding: 10px;
-}
+#input { display:flex; padding:10px; }
+input { flex:1; padding:10px; }
+button { padding:10px; }
 </style>
 </head>
 
 <body>
 
 <div id="left">
-  <h3>📋 상담 목록</h3>
-  <div id="sessions"></div>
+  <h3>상담목록</h3>
+  <div id="list"></div>
 </div>
 
 <div id="right">
-  <h3>💬 상담창</h3>
   <div id="chat"></div>
 
-  <input id="msgInput" placeholder="답장 입력">
-  <button onclick="sendReply()">전송</button>
+  <div id="input">
+    <input id="msg" placeholder="답장">
+    <button onclick="send()">전송</button>
+  </div>
 </div>
 
 <script>
 const socket = io("https://waterbridge-chat-server-production.up.railway.app");
 
-let currentSession = null;
+let current = null;
 const sessions = {};
-const chatBox = document.getElementById("chat");
-const sessionBox = document.getElementById("sessions");
 
-/* ================================
-   🔥 1. 기존 세션 서버에서 불러오기
-================================ */
-async function loadSessions() {
-  try {
-    const res = await fetch("https://waterbridge-chat-server-production.up.railway.app/sessions");
-    const data = await res.json();
+const list = document.getElementById("list");
+const chat = document.getElementById("chat");
 
-    data.forEach(s => {
-      if (!sessions[s.sessionId]) {
-        sessions[s.sessionId] = [];
-        addSession(s.sessionId);
-      }
-    });
+socket.emit("agent-online");
 
-  } catch (err) {
-    console.log("세션 로딩 실패:", err.message);
-  }
-}
-
-loadSessions();
-
-/* ================================
-   🔥 2. 실시간 메시지 수신
-================================ */
+/* 실시간 */
 socket.on("message", (data) => {
 
-  const id = data.sessionId;
-
-  if (!sessions[id]) {
-    sessions[id] = [];
-    addSession(id);
+  if (!sessions[data.sessionId]) {
+    sessions[data.sessionId] = [];
+    addSession(data.sessionId);
   }
 
-  sessions[id].push({
-  from: data.from,
-  text: data.text
+  sessions[data.sessionId].push(data);
+
+  if (current === data.sessionId) render(data.sessionId);
 });
 
-  if (currentSession === id) {
-    renderChat(id);
-  }
-});
-
-/* ================================
-   🔥 3. 세션 추가 UI
-================================ */
+/* 세션 추가 */
 function addSession(id) {
   const div = document.createElement("div");
   div.className = "session";
-  div.innerText = "🟢 " + id;
+  div.innerText = id;
 
   div.onclick = () => {
-
-    // active 초기화
-    document.querySelectorAll(".session").forEach(el => {
-      el.classList.remove("active");
-    });
-
-    div.classList.add("active");
-
-    currentSession = id;
-    renderChat(id);
+    current = id;
+    render(id);
   };
 
-  sessionBox.appendChild(div);
-
-  // 🔥 여기부터 “새 메시지 알림 효과”
-  div.dataset.blink = "true";
-
-  div.style.animation = "blink 1s infinite";
+  list.appendChild(div);
 }
 
-/* ================================
-   🔥 4. 채팅 렌더
-================================ */
-function renderChat(id) {
-  chatBox.innerHTML = "";
+/* 렌더 */
+function render(id) {
+  chat.innerHTML = "";
 
   (sessions[id] || []).forEach(m => {
+
     const div = document.createElement("div");
-    div.className = "msg";
-    div.innerText =
-  (m.from === "admin" ? "관리자: " : "고객: ") + m.text;
-    chatBox.appendChild(div);
+
+    div.className =
+      "msg " + (m.from === "admin" ? "admin" :
+                m.from === "bot" ? "bot" : "user");
+
+    div.innerText = (m.from + ": " + m.text);
+
+    chat.appendChild(div);
   });
+
+  chat.scrollTop = chat.scrollHeight;
 }
 
-/* ================================
-   🔥 5. 관리자 답장
-================================ */
-function sendReply() {
-  const text = document.getElementById("msgInput").value;
+/* 답장 */
+function send() {
 
-  if (!currentSession || !text) return;
+  const text = document.getElementById("msg").value;
 
   fetch("https://waterbridge-chat-server-production.up.railway.app/reply", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      sessionId: currentSession,
-      text
-    })
+    method:"POST",
+    headers:{ "Content-Type":"application/json" },
+    body: JSON.stringify({ sessionId: current, text })
   });
 
-  sessions[currentSession].push("관리자: " + text);
-  renderChat(currentSession);
-
-  document.getElementById("msgInput").value = "";
+  document.getElementById("msg").value = "";
 }
 </script>
 

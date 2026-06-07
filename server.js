@@ -5,6 +5,7 @@ const cors = require("cors");
 const http = require("http");
 const axios = require("axios");
 const { Server } = require("socket.io");
+const crypto = require("crypto");
 
 const app = express();
 const server = http.createServer(app);
@@ -15,11 +16,6 @@ const PORT = process.env.PORT || 3000;
 const BOT_TOKEN = process.env.BOT_TOKEN;
 const CHAT_ID = process.env.CHAT_ID;
 
-/* ================= SAFE CHECK ================= */
-if (!BOT_TOKEN || !CHAT_ID) {
-  console.log("❌ Missing BOT_TOKEN or CHAT_ID (Telegram disabled)");
-}
-
 /* ================= CORS ================= */
 const allowedOrigins = [
   "http://www.waterbridgepartners.kr",
@@ -28,7 +24,7 @@ const allowedOrigins = [
 
 app.use(cors({
   origin: allowedOrigins,
-  methods: ["GET", "POST", "OPTIONS"],
+  methods: ["GET", "POST"],
   credentials: true
 }));
 
@@ -36,41 +32,81 @@ app.use(express.json());
 
 /* ================= SOCKET ================= */
 const io = new Server(server, {
-  cors: {
-    origin: allowedOrigins,
-    methods: ["GET", "POST"]
-  }
+  cors: { origin: allowedOrigins }
 });
 
-/* ================= MEMORY DB (SaaS CORE) ================= */
-const sessions = new Map();   // sessionId → messages[]
-const sessionMeta = new Map(); // sessionId → metadata
+/* ================= DB ================= */
+const sessions = new Map();
+const agents = new Map(); // 상담원 관리
 
-/* ================= SOCKET CONNECT ================= */
+/* ================= UTIL ================= */
+function getLeastBusyAgent() {
+  let best = null;
+  let min = Infinity;
+
+  for (const [id, agent] of agents.entries()) {
+    if (agent.status !== "online") continue;
+    if (agent.sessions < min) {
+      min = agent.sessions;
+      best = id;
+    }
+  }
+
+  return best;
+}
+
+/* ================= SOCKET ================= */
 io.on("connection", (socket) => {
 
-  console.log("🟢 CONNECT:", socket.id);
+  console.log("CONNECT:", socket.id);
+
+  /* 상담원 등록 */
+  socket.on("agent-online", () => {
+    agents.set(socket.id, {
+      status: "online",
+      sessions: 0
+    });
+  });
 
   /* 고객 join */
   socket.on("join", (sessionId) => {
+
     socket.join(sessionId);
 
     if (!sessions.has(sessionId)) {
       sessions.set(sessionId, []);
     }
 
-    if (!sessionMeta.has(sessionId)) {
-      sessionMeta.set(sessionId, {
-        createdAt: Date.now(),
-        status: "active"
+    const agentId = getLeastBusyAgent();
+
+    if (agentId) {
+      agents.get(agentId).sessions++;
+
+      io.to(agentId).emit("new-session", {
+        sessionId
       });
     }
 
-    console.log("📌 JOIN:", sessionId);
+    io.to(sessionId).emit("status", {
+      sessionId,
+      status: "online"
+    });
+  });
+
+  /* 읽음 처리 */
+  socket.on("read", ({ sessionId, messageId }) => {
+
+    const msgs = sessions.get(sessionId);
+    if (!msgs) return;
+
+    const msg = msgs.find(m => m.id === messageId);
+    if (msg) msg.read = true;
+
+    io.to(sessionId).emit("read-update", { messageId });
   });
 
   socket.on("disconnect", () => {
-    console.log("🔴 DISCONNECT:", socket.id);
+    agents.delete(socket.id);
   });
 });
 
@@ -79,50 +115,48 @@ app.post("/send", async (req, res) => {
 
   const { message, sessionId } = req.body;
 
-  if (!message || !sessionId) {
-    return res.status(400).json({ error: "invalid request" });
-  }
+  const msg = {
+    id: crypto.randomUUID(),
+    from: "user",
+    text: message,
+    sessionId,
+    time: Date.now(),
+    read: false
+  };
 
-  console.log("🔥 USER MESSAGE:", sessionId, message);
-
-  /* 저장 */
   if (!sessions.has(sessionId)) {
     sessions.set(sessionId, []);
   }
 
-  sessions.get(sessionId).push({
-    from: "user",
-    text: message,
-    time: Date.now()
-  });
+  sessions.get(sessionId).push(msg);
 
-  /* realtime send */
-  io.to(sessionId).emit("message", {
-    from: "user",
-    text: message,
-    sessionId
-  });
+  io.to(sessionId).emit("message", msg);
 
-  /* Telegram (optional safe) */
-  if (BOT_TOKEN && CHAT_ID) {
-    try {
-      await axios.post(
-        `https://api.telegram.org/bot${BOT_TOKEN}/sendMessage`,
-        {
-          chat_id: CHAT_ID,
-          text: `📩 상담 요청\n\nID: ${sessionId}\n내용:\n${message}`
-        },
-        { timeout: 5000 }
-      );
+  /* AI 자동응답 */
+  let aiText = null;
 
-      console.log("✅ TELEGRAM SENT");
+  if (message.includes("시간")) aiText = "상담시간은 09:00~18:00 입니다.";
+  if (message.includes("대출")) aiText = "담당자가 곧 연결됩니다.";
 
-    } catch (err) {
-      console.log("❌ TELEGRAM ERROR:", err.message);
-    }
+  if (aiText) {
+    setTimeout(() => {
+
+      const botMsg = {
+        id: crypto.randomUUID(),
+        from: "bot",
+        text: aiText,
+        sessionId,
+        time: Date.now(),
+        read: true
+      };
+
+      sessions.get(sessionId).push(botMsg);
+      io.to(sessionId).emit("message", botMsg);
+
+    }, 800);
   }
 
-  res.json({ ok: true });
+  res.json({ ok: true, id: msg.id });
 });
 
 /* ================= ADMIN REPLY ================= */
@@ -130,64 +164,36 @@ app.post("/reply", (req, res) => {
 
   const { sessionId, text } = req.body;
 
-  if (!sessionId || !text) {
-    return res.status(400).json({ error: "invalid request" });
-  }
+  const msg = {
+    id: crypto.randomUUID(),
+    from: "admin",
+    text,
+    sessionId,
+    time: Date.now(),
+    read: true
+  };
 
-  console.log("💬 ADMIN:", sessionId, text);
-
-  /* 저장 */
   if (!sessions.has(sessionId)) {
     sessions.set(sessionId, []);
   }
 
-  sessions.get(sessionId).push({
-    from: "admin",
-    text,
-    time: Date.now()
-  });
+  sessions.get(sessionId).push(msg);
 
-  /* realtime send */
-  io.to(sessionId).emit("message", {
-    from: "admin",
-    text,
-    sessionId
-  });
+  io.to(sessionId).emit("message", msg);
 
-  res.json({ success: true });
+  res.json({ ok: true, id: msg.id });
 });
 
-/* ================= SESSIONS LIST ================= */
+/* ================= API ================= */
 app.get("/sessions", (req, res) => {
-  const list = Array.from(sessions.keys()).map(id => ({
-    sessionId: id,
-    lastMessage: sessions.get(id)?.slice(-1)[0] || null,
-    meta: sessionMeta.get(id) || {}
-  }));
-
-  res.json(list);
+  res.json(Array.from(sessions.keys()));
 });
 
-/* ================= MESSAGES ================= */
-app.get("/messages/:sessionId", (req, res) => {
-
-  const { sessionId } = req.params;
-
-  res.json(sessions.get(sessionId) || []);
-});
-
-/* ================= ADMIN PAGE ================= */
-const path = require("path");
-
-app.get("/admin", (req, res) => {
-  res.sendFile(path.join(__dirname, "admin.html"));
-});
-/* ================= HEALTH CHECK ================= */
-app.get("/", (req, res) => {
-  res.send("🚀 Zendesk-lite SaaS Running");
+app.get("/messages/:id", (req, res) => {
+  res.json(sessions.get(req.params.id) || []);
 });
 
 /* ================= START ================= */
 server.listen(PORT, "0.0.0.0", () => {
-  console.log("🚀 SAAS SERVER RUNNING ON", PORT);
+  console.log("SERVER RUNNING:", PORT);
 });
