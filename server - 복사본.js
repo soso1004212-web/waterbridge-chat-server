@@ -7,24 +7,6 @@ const { Server } = require("socket.io");
 const app = express();
 const server = http.createServer(app);
 
-// ===== 환경변수 =====
-const PORT = process.env.PORT || 3000;
-const BOT_TOKEN = process.env.BOT_TOKEN;
-const CHAT_ID = process.env.CHAT_ID;
-
-// ===== CORS =====
-app.use(cors({
-  origin: [
-    "http://www.waterbridgepartners.kr",
-    "https://www.waterbridgepartners.kr"
-  ],
-  methods: ["GET", "POST"],
-  credentials: true
-}));
-
-app.use(express.json());
-
-// ===== Socket.IO =====
 const io = new Server(server, {
   cors: {
     origin: [
@@ -33,24 +15,31 @@ const io = new Server(server, {
     ],
     methods: ["GET", "POST"],
     credentials: true
-  }
+  },
+
+  // 🔥 여기 수정
+  transports: ["websocket"]
 });
 
-// ===== 기본 체크 =====
+app.use(cors({
+  origin: [
+    "http://www.waterbridgepartners.kr",
+    "https://www.waterbridgepartners.kr"
+  ]
+}));
+app.use(express.json());
+
+const BOT_TOKEN = "8881120675:AAHVuJ7RnhHBhcEVog0wRBzqNDXqvO1ArRE";
+const CHAT_ID = "8643867290";
+
 app.get("/", (req, res) => {
   res.send("WaterBridge Chat Server Running");
 });
 
-// ===== 상담 메시지 → Telegram =====
 app.post("/send", (req, res) => {
   const { message, sessionId } = req.body;
 
-  if (!message) {
-    return res.status(400).json({ success: false, error: "no message" });
-  }
-
-  // 먼저 응답 (중요)
-  res.json({ success: true });
+  res.json({ success: true }); // 먼저 응답
 
   axios.post(`https://api.telegram.org/bot${BOT_TOKEN}/sendMessage`, {
     chat_id: CHAT_ID,
@@ -60,8 +49,8 @@ app.post("/send", (req, res) => {
   });
 });
 
-// ===== Telegram → 프론트 실시간 전달 =====
 app.post("/reply", (req, res) => {
+
   const { sessionId, text } = req.body;
 
   io.emit("telegramReply", {
@@ -69,19 +58,24 @@ app.post("/reply", (req, res) => {
     text
   });
 
-  res.json({ success: true });
+  res.json({
+    success: true
+  });
+
 });
 
-// ===== Socket 연결 =====
 io.on("connection", (socket) => {
+
   console.log("🔵 사용자 연결됨:", socket.id);
 
   socket.on("disconnect", () => {
-    console.log("🔴 사용자 종료:", socket.id);
+    console.log("🔴 사용자 종료");
   });
+
 });
 
-// ===== 서버 실행 =====
+const PORT = process.env.PORT;
+
 server.listen(PORT, "0.0.0.0", () => {
-  console.log("🚀 서버 실행중:", PORT);
+  console.log("서버 실행중", PORT);
 });
