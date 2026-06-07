@@ -1,0 +1,203 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<title>관리자 상담 페이지</title>
+
+<script src="https://cdn.socket.io/4.8.1/socket.io.min.js"></script>
+
+<style>
+
+@keyframes blink {
+  0% { background:#222; }
+  50% { background:#444; }
+  100% { background:#222; }
+}
+body {
+  font-family: Arial;
+  background: #111;
+  color: white;
+  display: flex;
+}
+
+/* 좌측 */
+#left {
+  width: 30%;
+  border-right: 1px solid #333;
+  height: 100vh;
+  overflow-y: auto;
+}
+
+/* 우측 */
+#right {
+  flex: 1;
+  padding: 20px;
+}
+
+.session {
+  padding: 10px;
+  border-bottom: 1px solid #333;
+  cursor: pointer;
+}
+
+.session:hover {
+  background: #222;
+}
+
+.session.active {
+  background: #444;
+  font-weight: bold;
+}
+
+.msg {
+  margin: 10px 0;
+}
+
+input {
+  width: 80%;
+  padding: 10px;
+}
+
+button {
+  padding: 10px;
+}
+</style>
+</head>
+
+<body>
+
+<div id="left">
+  <h3>📋 상담 목록</h3>
+  <div id="sessions"></div>
+</div>
+
+<div id="right">
+  <h3>💬 상담창</h3>
+  <div id="chat"></div>
+
+  <input id="msgInput" placeholder="답장 입력">
+  <button onclick="sendReply()">전송</button>
+</div>
+
+<script>
+const socket = io("https://waterbridge-chat-server-production.up.railway.app");
+
+let currentSession = null;
+const sessions = {};
+const chatBox = document.getElementById("chat");
+const sessionBox = document.getElementById("sessions");
+
+/* ================================
+   🔥 1. 기존 세션 서버에서 불러오기
+================================ */
+async function loadSessions() {
+  try {
+    const res = await fetch("https://waterbridge-chat-server-production.up.railway.app/sessions");
+    const data = await res.json();
+
+    data.forEach(s => {
+      if (!sessions[s.sessionId]) {
+        sessions[s.sessionId] = [];
+        addSession(s.sessionId);
+      }
+    });
+
+  } catch (err) {
+    console.log("세션 로딩 실패:", err.message);
+  }
+}
+
+loadSessions();
+
+/* ================================
+   🔥 2. 실시간 메시지 수신
+================================ */
+socket.on("message", (data) => {
+
+  const id = data.sessionId;
+
+  if (!sessions[id]) {
+    sessions[id] = [];
+    addSession(id);
+  }
+
+  sessions[id].push({
+  from: data.from,
+  text: data.text
+});
+
+  if (currentSession === id) {
+    renderChat(id);
+  }
+});
+
+/* ================================
+   🔥 3. 세션 추가 UI
+================================ */
+function addSession(id) {
+  const div = document.createElement("div");
+  div.className = "session";
+  div.innerText = "🟢 " + id;
+
+  div.onclick = () => {
+
+    // active 초기화
+    document.querySelectorAll(".session").forEach(el => {
+      el.classList.remove("active");
+    });
+
+    div.classList.add("active");
+
+    currentSession = id;
+    renderChat(id);
+  };
+
+  sessionBox.appendChild(div);
+
+  // 🔥 여기부터 “새 메시지 알림 효과”
+  div.dataset.blink = "true";
+
+  div.style.animation = "blink 1s infinite";
+}
+
+/* ================================
+   🔥 4. 채팅 렌더
+================================ */
+function renderChat(id) {
+  chatBox.innerHTML = "";
+
+  (sessions[id] || []).forEach(m => {
+    const div = document.createElement("div");
+    div.className = "msg";
+    div.innerText =
+  (m.from === "admin" ? "관리자: " : "고객: ") + m.text;
+    chatBox.appendChild(div);
+  });
+}
+
+/* ================================
+   🔥 5. 관리자 답장
+================================ */
+function sendReply() {
+  const text = document.getElementById("msgInput").value;
+
+  if (!currentSession || !text) return;
+
+  fetch("https://waterbridge-chat-server-production.up.railway.app/reply", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      sessionId: currentSession,
+      text
+    })
+  });
+
+  sessions[currentSession].push("관리자: " + text);
+  renderChat(currentSession);
+
+  document.getElementById("msgInput").value = "";
+}
+</script>
+
+</body>
+</html>
