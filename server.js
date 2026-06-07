@@ -8,71 +8,97 @@ const app = express();
 const server = http.createServer(app);
 
 // =========================
-// 🔐 ENV (보안 핵심)
+// 🔐 ENV
 // =========================
 const PORT = process.env.PORT || 3000;
 const BOT_TOKEN = process.env.BOT_TOKEN;
 const CHAT_ID = process.env.CHAT_ID;
 
 // =========================
-// 🚨 필수 환경변수 체크
+// 🚨 ENV 체크
 // =========================
 if (!BOT_TOKEN || !CHAT_ID) {
-  console.error("❌ BOT_TOKEN 또는 CHAT_ID가 설정되지 않았습니다.");
+  console.error("❌ Missing BOT_TOKEN or CHAT_ID");
   process.exit(1);
 }
 
 // =========================
-// 🌐 CORS 설정
+// 🌐 허용 도메인
 // =========================
 const allowedOrigins = [
   "http://www.waterbridgepartners.kr",
   "https://www.waterbridgepartners.kr"
 ];
 
+// =========================
+// 🔥 CORS (완전 안정 버전)
+// =========================
 app.use(cors({
-  origin: allowedOrigins,
-  methods: ["GET", "POST"],
+  origin: function (origin, callback) {
+    if (!origin) return callback(null, true);
+
+    if (allowedOrigins.includes(origin)) {
+      return callback(null, true);
+    }
+
+    console.log("❌ CORS blocked:", origin);
+    return callback(null, false);
+  },
+  methods: ["GET", "POST", "OPTIONS"],
   credentials: true
 }));
+
+// 🔥 preflight 반드시 허용
+app.options("*", cors());
 
 app.use(express.json());
 
 // =========================
-// ⚡ Socket.IO 안정 설정
+// ⚡ Socket.IO (완전 안정)
 // =========================
 const io = new Server(server, {
   cors: {
-    origin: allowedOrigins,
+    origin: function (origin, callback) {
+      if (!origin) return callback(null, true);
+
+      if (allowedOrigins.includes(origin)) {
+        return callback(null, true);
+      }
+
+      return callback(null, false);
+    },
     methods: ["GET", "POST"],
     credentials: true
-  }
+  },
+
+  // 🔥 핵심 수정 (polling 문제 해결)
+  transports: ["polling", "websocket"]
 });
 
 // =========================
-// 🟢 Health Check (Railway용 중요)
+// 🟢 Health Check
 // =========================
 app.get("/", (req, res) => {
   res.status(200).send("WaterBridge Chat Server Running 🚀");
 });
 
 // =========================
-// 📩 상담 → Telegram 전송
+// 📩 상담 → Telegram
 // =========================
 app.post("/send", async (req, res) => {
+  const { message, sessionId } = req.body;
+
+  if (!message || !message.trim()) {
+    return res.status(400).json({
+      success: false,
+      error: "message required"
+    });
+  }
+
+  // 먼저 응답
+  res.json({ success: true });
+
   try {
-    const { message, sessionId } = req.body;
-
-    if (!message || message.trim().length === 0) {
-      return res.status(400).json({
-        success: false,
-        error: "message is required"
-      });
-    }
-
-    // 먼저 응답 (UX 중요)
-    res.json({ success: true });
-
     const text = `📩 새 상담\n\n세션: ${sessionId || "unknown"}\n\n내용:\n${message}`;
 
     await axios.post(
@@ -85,50 +111,42 @@ app.post("/send", async (req, res) => {
     );
 
   } catch (err) {
-    console.error("❌ /send error:", err.message);
+    console.error("❌ Telegram error:", err.message);
   }
 });
 
 // =========================
-// 💬 Telegram → 사용자 실시간 전달
+// 💬 Telegram → 프론트 전달
 // =========================
 app.post("/reply", (req, res) => {
-  try {
-    const { sessionId, text } = req.body;
+  const { sessionId, text } = req.body;
 
-    if (!sessionId || !text) {
-      return res.status(400).json({
-        success: false,
-        error: "invalid payload"
-      });
-    }
-
-    io.emit("telegramReply", {
-      sessionId,
-      text
+  if (!sessionId || !text) {
+    return res.status(400).json({
+      success: false,
+      error: "invalid payload"
     });
-
-    res.json({ success: true });
-
-  } catch (err) {
-    console.error("❌ /reply error:", err.message);
   }
+
+  io.emit("telegramReply", { sessionId, text });
+
+  res.json({ success: true });
 });
 
 // =========================
-// 🔌 Socket 연결 관리
+// 🔌 Socket 연결
 // =========================
 io.on("connection", (socket) => {
-  console.log("🟢 연결됨:", socket.id);
+  console.log("🟢 Connected:", socket.id);
 
   socket.on("disconnect", () => {
-    console.log("🔴 연결 종료:", socket.id);
+    console.log("🔴 Disconnected:", socket.id);
   });
 });
 
 // =========================
-// 🚀 서버 실행
+// 🚀 Start Server
 // =========================
 server.listen(PORT, "0.0.0.0", () => {
-  console.log(`🚀 Server running on port ${PORT}`);
+  console.log(`🚀 Server running on ${PORT}`);
 });
