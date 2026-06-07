@@ -6,6 +6,9 @@ const { Server } = require("socket.io");
 const app = express();
 const server = http.createServer(app);
 
+console.log("BOOT START");
+console.log("BOT:", !!process.env.BOT_TOKEN);
+console.log("CHAT:", !!process.env.CHAT_ID);
 const PORT = process.env.PORT || 3000;
 
 // 🔐 ENV 체크 (임시 주석 테스트 가능)
