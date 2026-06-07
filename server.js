@@ -36,25 +36,17 @@ app.get("/", (req, res) => {
   res.send("WaterBridge Chat Server Running");
 });
 
-app.post("/send", async (req, res) => {
-
+app.post("/send", (req, res) => {
   const { message, sessionId } = req.body;
 
-  // 👉 먼저 응답 (서버 안 멈추게)
-  res.json({ success: true });
+  res.json({ success: true }); // 먼저 응답
 
-  try {
-    await axios.post(
-      `https://api.telegram.org/bot${BOT_TOKEN}/sendMessage`,
-      {
-        chat_id: CHAT_ID,
-        text: `📩 새 상담\n\n세션: ${sessionId}\n\n내용:\n${message}`
-      }
-    );
-  } catch (err) {
+  axios.post(`https://api.telegram.org/bot${BOT_TOKEN}/sendMessage`, {
+    chat_id: CHAT_ID,
+    text: `📩 새 상담\n\n세션: ${sessionId}\n\n내용:\n${message}`
+  }).catch(err => {
     console.log("텔레그램 오류:", err.message);
-  }
-
+  });
 });
 
 app.post("/reply", (req, res) => {
@@ -82,7 +74,7 @@ io.on("connection", (socket) => {
 
 });
 
-const PORT = process.env.PORT || 3000;
+const PORT = process.env.PORT;
 
 server.listen(PORT, "0.0.0.0", () => {
   console.log("서버 실행중", PORT);
