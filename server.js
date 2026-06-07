@@ -1,6 +1,7 @@
 const express = require("express");
 const cors = require("cors");
 const http = require("http");
+const axios = require("axios");
 const { Server } = require("socket.io");
 
 const app = express();
@@ -8,11 +9,22 @@ const server = http.createServer(app);
 
 const PORT = process.env.PORT || 3000;
 
+// ================= ENV =================
+const BOT_TOKEN = process.env.BOT_TOKEN;
+const CHAT_ID = process.env.CHAT_ID;
+
+if (!BOT_TOKEN || !CHAT_ID) {
+  console.log("❌ Missing BOT_TOKEN or CHAT_ID");
+}
+
+// ================= CORS =================
+const allowedOrigins = [
+  "http://www.waterbridgepartners.kr",
+  "https://www.waterbridgepartners.kr"
+];
+
 app.use(cors({
-  origin: [
-    "http://www.waterbridgepartners.kr",
-    "https://www.waterbridgepartners.kr"
-  ],
+  origin: allowedOrigins,
   methods: ["GET", "POST", "OPTIONS"],
   credentials: true
 }));
@@ -27,7 +39,7 @@ const io = new Server(server, {
   }
 });
 
-// ================= ROOM JOIN =================
+// ================= CONNECTION =================
 io.on("connection", (socket) => {
 
   console.log("USER CONNECT:", socket.id);
@@ -42,8 +54,8 @@ io.on("connection", (socket) => {
   });
 });
 
-// ================= USER → ADMIN =================
-app.post("/send", (req, res) => {
+// ================= USER → SERVER → TELEGRAM =================
+app.post("/send", async (req, res) => {
   const { message, sessionId } = req.body;
 
   if (!message || !sessionId) {
@@ -52,8 +64,22 @@ app.post("/send", (req, res) => {
 
   console.log("USER MSG:", sessionId, message);
 
-  // 👉 Telegram 보내기 (옵션)
-  // axios.post(...)
+  // 🔥 Telegram 전송
+  try {
+    if (BOT_TOKEN && CHAT_ID) {
+      await axios.post(
+        `https://api.telegram.org/bot${BOT_TOKEN}/sendMessage`,
+        {
+          chat_id: CHAT_ID,
+          text: `📩 상담 요청\n\nID: ${sessionId}\n내용:\n${message}`
+        }
+      );
+
+      console.log("✅ TELEGRAM SENT");
+    }
+  } catch (err) {
+    console.log("❌ TELEGRAM ERROR:", err.message);
+  }
 
   res.json({ success: true });
 });
@@ -68,7 +94,7 @@ app.post("/reply", (req, res) => {
 
   console.log("ADMIN REPLY:", sessionId, text);
 
-  // 🔥 핵심: 특정 사용자에게 즉시 전달
+  // 🔥 실시간 전달
   io.to(sessionId).emit("reply", {
     text
   });
@@ -78,9 +104,10 @@ app.post("/reply", (req, res) => {
 
 // ================= HEALTH =================
 app.get("/", (req, res) => {
-  res.send("OK - Live Chat Running");
+  res.send("OK - Live Chat Running 🚀");
 });
 
+// ================= START =================
 server.listen(PORT, "0.0.0.0", () => {
   console.log("RUNNING ON", PORT);
 });
