@@ -49,7 +49,6 @@ app.use(cors({
 }));
 
 // 🔥 preflight 반드시 허용
-app.options("*", cors());
 
 app.use(express.json());
 
