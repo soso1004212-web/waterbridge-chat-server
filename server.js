@@ -9,14 +9,21 @@ const server = http.createServer(app);
 
 const io = new Server(server, {
   cors: {
-    origin: "*",
-    methods: ["GET", "POST"]
+    origin: [
+      "http://www.waterbridgepartners.kr",
+      "https://www.waterbridgepartners.kr"
+    ],
+    methods: ["GET", "POST"],
+    credentials: true
   },
-  transports: ["websocket"]
+  transports: ["websocket", "polling"]
 });
 
 app.use(cors({
-  origin: "*"
+  origin: [
+    "http://www.waterbridgepartners.kr",
+    "https://www.waterbridgepartners.kr"
+  ]
 }));
 app.use(express.json());
 
