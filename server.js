@@ -177,10 +177,11 @@ app.get("/messages/:sessionId", (req, res) => {
 });
 
 /* ================= ADMIN PAGE ================= */
-app.get("/admin", (req, res) => {
-  res.sendFile(__dirname + "/admin.html");
-});
+const path = require("path");
 
+app.get("/admin", (req, res) => {
+  res.sendFile(path.join(__dirname, "admin.html"));
+});
 /* ================= HEALTH CHECK ================= */
 app.get("/", (req, res) => {
   res.send("🚀 Zendesk-lite SaaS Running");
