@@ -6,6 +6,7 @@ const http = require("http");
 const axios = require("axios");
 const { Server } = require("socket.io");
 const crypto = require("crypto");
+const path = require("path");
 
 const app = express();
 const server = http.createServer(app);
@@ -17,6 +18,11 @@ const BOT_TOKEN = process.env.BOT_TOKEN;
 const CHAT_ID = process.env.CHAT_ID;
 
 /* ================= CORS ================= */
+const allowedOrigins = [
+  "http://www.waterbridgepartners.kr",
+  "https://www.waterbridgepartners.kr"
+];
+
 app.use(cors({
   origin: allowedOrigins,
   methods: ["GET", "POST"],
@@ -25,13 +31,13 @@ app.use(cors({
 
 app.use(express.json());
 
-/* ================= ADMIN PAGE (여기 넣어) ================= */
-const path = require("path");
+/* ================= STATIC FILE ================= */
+// public 폴더 사용 (권장)
+app.use(express.static(path.join(__dirname, "public")));
 
-app.use(express.static("public"));
-
+/* ================= ADMIN PAGE ================= */
 app.get("/admin", (req, res) => {
-  res.sendFile(path.join(__dirname, "admin.html"));
+  res.sendFile(path.join(__dirname, "public", "admin.html"));
 });
 
 /* ================= SOCKET ================= */
@@ -41,7 +47,7 @@ const io = new Server(server, {
 
 /* ================= DB ================= */
 const sessions = new Map();
-const agents = new Map(); // 상담원 관리
+const agents = new Map();
 
 /* ================= UTIL ================= */
 function getLeastBusyAgent() {
@@ -64,7 +70,6 @@ io.on("connection", (socket) => {
 
   console.log("CONNECT:", socket.id);
 
-  /* 상담원 등록 */
   socket.on("agent-online", () => {
     agents.set(socket.id, {
       status: "online",
@@ -72,7 +77,6 @@ io.on("connection", (socket) => {
     });
   });
 
-  /* 고객 join */
   socket.on("join", (sessionId) => {
 
     socket.join(sessionId);
@@ -95,18 +99,6 @@ io.on("connection", (socket) => {
       sessionId,
       status: "online"
     });
-  });
-
-  /* 읽음 처리 */
-  socket.on("read", ({ sessionId, messageId }) => {
-
-    const msgs = sessions.get(sessionId);
-    if (!msgs) return;
-
-    const msg = msgs.find(m => m.id === messageId);
-    if (msg) msg.read = true;
-
-    io.to(sessionId).emit("read-update", { messageId });
   });
 
   socket.on("disconnect", () => {
@@ -165,6 +157,28 @@ app.post("/send", async (req, res) => {
 
 /* ================= ADMIN REPLY ================= */
 app.post("/reply", (req, res) => {
+
+/* ================= END SESSION ================= */
+app.post("/end", (req, res) => {
+
+  const { sessionId } = req.body;
+
+  if (!sessions.has(sessionId)) {
+    return res.json({ ok: false, message: "no session" });
+  }
+
+  const history = sessions.get(sessionId);
+
+  // (선택) 로그 저장
+  console.log("=== SESSION END ===");
+  console.log("ID:", sessionId);
+  console.log("HISTORY:", history);
+
+  // 실제 종료 처리
+  sessions.delete(sessionId);
+
+  res.json({ ok: true });
+});
 
   const { sessionId, text } = req.body;
 
