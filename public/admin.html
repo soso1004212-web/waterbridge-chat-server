@@ -270,27 +270,18 @@ function addMessage(m) {
 // 전송
 function sendMsg() {
 
-  const input =
-    document.getElementById("msgInput");
-
-  const text =
-    input.value.trim();
+  const input = document.getElementById("msgInput");
+  const text = input.value.trim();
 
   if (!text || !currentSession) {
     alert("고객을 먼저 선택하세요.");
     return;
   }
 
-socket.emit("adminMessage", {
-  sessionId: currentSession,
-  text,
-  adminName: "김철주"
-});
-
-  // 즉시 화면 표시
-  addMessage({
-    from:"admin",
-    text:text
+  socket.emit("adminMessage", {
+    sessionId: currentSession,
+    text,
+    adminName: "김철주"
   });
 
   input.value = "";
