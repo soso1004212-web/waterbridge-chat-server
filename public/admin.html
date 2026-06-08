@@ -4,7 +4,6 @@
 <meta charset="UTF-8" />
 <title>Admin Chat</title>
 
-<!-- socket.io -->
 <script src="/socket.io/socket.io.js"></script>
 
 <style>
@@ -38,7 +37,7 @@ body {
   background: #1f2a44;
 }
 
-/* 우측 영역 */
+/* 우측 */
 #chatArea {
   flex: 1;
   display: flex;
@@ -89,10 +88,8 @@ button {
 
 <body>
 
-<!-- 좌측 -->
 <div id="sessionList"></div>
 
-<!-- 우측 -->
 <div id="chatArea">
   <div id="info">세션 선택</div>
   <div id="chatBox"></div>
@@ -112,10 +109,10 @@ let sessionCache = [];
 
 // ================= CONNECT =================
 socket.on("connect", () => {
-  socket.emit("admin:join");
+  console.log("connected:", socket.id);
 });
 
-// ================= REALTIME MESSAGE =================
+// ================= REALTIME =================
 socket.on("chat:message", (msg) => {
   if (msg.sessionId === currentSession) {
     addMessage(msg);
@@ -123,8 +120,8 @@ socket.on("chat:message", (msg) => {
   loadSessions();
 });
 
-// ================= 0.5s AUTO REFRESH =================
-setInterval(loadSessions, 500);
+// ================= AUTO REFRESH =================
+setInterval(loadSessions, 1000);
 
 // ================= SESSION LIST =================
 async function loadSessions() {
@@ -162,8 +159,6 @@ async function loadSessions() {
 async function openChat(sessionId) {
   currentSession = sessionId;
 
-  socket.emit("admin:watch", sessionId);
-
   const res = await fetch(API + "/admin/messages/" + sessionId);
   const data = await res.json();
 
@@ -181,7 +176,7 @@ async function openChat(sessionId) {
   loadSessions();
 }
 
-// ================= CHAT UI (카톡 스타일) =================
+// ================= MESSAGE UI =================
 function addMessage(m) {
   const box = document.getElementById("chatBox");
 
@@ -196,7 +191,6 @@ function addMessage(m) {
   bubble.style.padding = "10px 14px";
   bubble.style.borderRadius = "16px";
   bubble.style.fontSize = "14px";
-  bubble.style.lineHeight = "1.4";
   bubble.style.wordBreak = "break-word";
 
   if (m.from === "admin") {
@@ -237,14 +231,13 @@ function sendMsg() {
 
   socket.emit("admin:message", {
     sessionId: currentSession,
-    text,
-    adminName: "상담원"
+    text
   });
 
   input.value = "";
 }
 
-// ENTER 전송
+// ENTER
 document.getElementById("msgInput").addEventListener("keydown", e => {
   if (e.key === "Enter") sendMsg();
 });
