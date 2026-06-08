@@ -3,118 +3,139 @@ const express = require("express");
 const http = require("http");
 const cors = require("cors");
 const { Server } = require("socket.io");
-const mongoose = require("mongoose");
-const path = require("path");
 
 const app = express();
 const server = http.createServer(app);
 
-app.use(cors({ origin: "*" }));
+app.use(cors());
 app.use(express.json());
-app.use(express.static(path.join(__dirname, "public")));
-
-app.get("/admin", (req, res) => {
-  res.sendFile(path.join(__dirname, "public", "admin.html"));
-});
 
 const io = new Server(server, {
   cors: { origin: "*" }
 });
 
-// ================= DB =================
-const MessageSchema = new mongoose.Schema({
-  sessionId: String,
-  text: String,
-  from: String,
-  adminName: String,
-  createdAt: { type: Date, default: Date.now }
-});
 
-const Message = mongoose.model("Message", MessageSchema);
-
-// ================= SOCKET =================
-io.on("connection", (socket) => {
-  console.log("connect:", socket.id);
-
-  // USER JOIN
-  socket.on("user:join", async (sessionId) => {
-  if (!sessionId) return;
-
-  socket.data.sessionId = sessionId;
-
-  socket.join(`session:${sessionId}`);
-
-  console.log("USER JOIN:", sessionId);
-
-  const history = await Message.find({ sessionId }).sort({ createdAt: 1 });
-  socket.emit("chat:history", history);
-
-  io.to("admins").emit("admin:user_online", { sessionId });
-});
-
-  // ADMIN JOIN
-  socket.on("admin:join", () => {
-    socket.join("admins");
-  });
-
-  // ADMIN WATCH (정리된 구조)
- socket.on("admin:watch", (sessionId) => {
-  if (!sessionId) return;
-
-  // 기존 session room 제거
-  for (const room of socket.rooms) {
-    if (room !== socket.id && room.startsWith("session:")) {
-      socket.leave(room);
-    }
+// =====================
+// MEMORY DB
+// =====================
+const sessions = {}; 
+/*
+sessions = {
+  sessionId: {
+    messages: []
   }
+}
+*/
 
-  socket.join(`session:${sessionId}`);
-  socket.data.watchSession = sessionId;
 
-  console.log("ADMIN WATCH:", sessionId);
-});
+// =====================
+// SOCKET CONNECTION
+// =====================
+io.on("connection", (socket) => {
 
+  console.log("connected:", socket.id);
+
+
+  // =====================
   // USER MESSAGE
-  socket.on("user:message", async ({ sessionId, text }) => {
-    if (!sessionId || !text) return;
+  // =====================
+  socket.on("user:message", (data) => {
 
-    const msg = await Message.create({
+    // ✅ sessionId 안전 처리 (핵심 수정)
+    const sessionId = data.sessionId || socket.id;
+    const text = data.text;
+
+    if (!text) return;
+
+    if (!sessions[sessionId]) {
+      sessions[sessionId] = { messages: [] };
+    }
+
+    const msg = {
       sessionId,
       text,
-      from: "user"
-    });
+      from: "user",
+      time: Date.now()
+    };
 
-    io.to(`session:${sessionId}`).emit("chat:message", msg);
-    io.to("admins").emit("chat:message", msg);
+    sessions[sessionId].messages.push(msg);
+
+    // 👉 관리자 + 모든 클라이언트로 전송
+    io.emit("chat:message", msg);
   });
 
+
+
+  // =====================
   // ADMIN MESSAGE
-  socket.on("admin:message", async ({ sessionId, text, adminName }) => {
+  // =====================
+  socket.on("admin:message", (data) => {
+
+    const sessionId = data.sessionId;
+    const text = data.text;
+
     if (!sessionId || !text) return;
 
-    const msg = await Message.create({
+    if (!sessions[sessionId]) {
+      sessions[sessionId] = { messages: [] };
+    }
+
+    const msg = {
       sessionId,
       text,
       from: "admin",
-      adminName: adminName || "상담원"
-    });
+      time: Date.now()
+    };
 
-    io.to(`session:${sessionId}`).emit("chat:message", msg);
-    io.to("admins").emit("chat:message", msg);
+    sessions[sessionId].messages.push(msg);
+
+    // 👉 고객 + 관리자 모두에게 전달
+    io.emit("chat:message", msg);
   });
 
-  // DISCONNECT
-  socket.on("disconnect", () => {
-    console.log("disconnect:", socket.id);
+
+
+  // =====================
+  // DEBUG (필수: 문제 찾기용)
+  // =====================
+  socket.onAny((event, data) => {
+    console.log("EVENT:", event, data);
   });
+
 });
 
-async function start() {
-  await mongoose.connect(process.env.MONGO_URI);
 
-  server.listen(process.env.PORT || 3000, () => {
-    console.log("server running");
-  });
-}
 
-start();
+// =====================
+// ADMIN API - SESSION LIST
+// =====================
+app.get("/admin/sessions", (req, res) => {
+
+  const list = Object.keys(sessions).map(sessionId => ({
+    sessionId,
+    lastMessage: sessions[sessionId]?.messages.slice(-1)[0]?.text || ""
+  }));
+
+  res.json(list);
+});
+
+
+
+// =====================
+// ADMIN API - MESSAGES
+// =====================
+app.get("/admin/messages/:sessionId", (req, res) => {
+
+  const { sessionId } = req.params;
+
+  res.json(sessions[sessionId]?.messages || []);
+});
+
+
+
+// =====================
+// START SERVER
+// =====================
+server.listen(3000, () => {
+  console.log("Server running on 3000");
+});
