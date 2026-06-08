@@ -72,21 +72,26 @@ socket.on("connect", () => {
   socket.emit("admin:join");
 });
 
-// ================= MESSAGE (SaaS 통일) =================
+// ================= MESSAGE =================
 socket.on("chat:message", (msg) => {
 
-  // 현재 보고 있는 세션만 출력
   if (msg.sessionId === currentSession) {
     addMessage(msg);
   }
 
-  // 세션 리스트 갱신
   loadSessions();
 });
 
-// ================= SESSION EVENTS =================
-socket.on("admin:user_online", loadSessions);
-socket.on("admin:user_offline", loadSessions);
+// ================= SESSION UPDATE =================
+let reloadTimer = null;
+
+function safeReload() {
+  clearTimeout(reloadTimer);
+  reloadTimer = setTimeout(loadSessions, 300);
+}
+
+socket.on("admin:user_online", safeReload);
+socket.on("admin:user_offline", safeReload);
 
 // ================= SESSION LIST =================
 async function loadSessions() {
@@ -114,7 +119,6 @@ async function loadSessions() {
 // ================= OPEN CHAT =================
 async function openChat(sessionId) {
 
-  // 🔥 이전 room 완전 제거 (중복 방지 핵심)
   if (joinedSession) {
     socket.emit("session:leave");
   }
@@ -122,8 +126,8 @@ async function openChat(sessionId) {
   joinedSession = sessionId;
   currentSession = sessionId;
 
-  // 🔥 SaaS 구조: join 통일
-  socket.emit("user:join", sessionId);
+  // 🔥 핵심: admin watch room join
+  socket.emit("admin:watch", sessionId);
 
   const res = await fetch(API + "/admin/messages/" + sessionId);
   const data = await res.json();
@@ -168,9 +172,6 @@ function sendMsg() {
 
   input.value = "";
 }
-
-// ❌ setInterval 제거 (중복/깜빡임 원인)
-// setInterval(loadSessions, 3000);
 
 loadSessions();
 </script>
