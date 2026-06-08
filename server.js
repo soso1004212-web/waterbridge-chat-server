@@ -39,7 +39,13 @@ const MessageSchema = new mongoose.Schema({
   sessionId: String,
   text: String,
   from: String,
+
   adminName: { type: String, default: "" },
+
+  // 🔥 추가 (여기)
+  readByAdmin: { type: Boolean, default: false },
+  readByUser: { type: Boolean, default: false },
+
   createdAt: { type: Date, default: Date.now }
 });
 
@@ -107,25 +113,71 @@ io.on("connection", (socket) => {
 
 // ================== API ==================
 app.get("/admin/messages/:sessionId", async (req, res) => {
+
+app.post("/message/read", async (req, res) => {
+  try {
+    const { sessionId, reader } = req.body;
+
+    // 👇 관리자가 읽었을 때
+    if (reader === "admin") {
+      await Message.updateMany(
+        { sessionId, from: "user", readByAdmin: false },
+        { $set: { readByAdmin: true } }
+      );
+    }
+
+    // 👇 유저가 읽었을 때 (나중 대비)
+    if (reader === "user") {
+      await Message.updateMany(
+        { sessionId, from: "admin", readByUser: false },
+        { $set: { readByUser: true } }
+      );
+    }
+
+    res.json({ ok: true });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "read update failed" });
+  }
+});
+c
   const data = await Message.find({ sessionId: req.params.sessionId }).sort({ createdAt: 1 });
   res.json(data);
 });
 
 app.get("/admin/sessions", async (req, res) => {
-  const messages = await Message.find().sort({ createdAt: -1 });
+  try {
+    const messages = await Message.find().sort({
+      createdAt: -1,
+    });
 
-  const sessions = {};
-  messages.forEach((m) => {
-    if (!sessions[m.sessionId]) {
-      sessions[m.sessionId] = {
-        sessionId: m.sessionId,
-        lastMessage: m.text,
-        updatedAt: m.createdAt
-      };
-    }
-  });
+    const sessions = {};
 
-  res.json(Object.values(sessions));
+    messages.forEach((m) => {
+
+      // ✅ 처음 세션 생성
+      if (!sessions[m.sessionId]) {
+        sessions[m.sessionId] = {
+          sessionId: m.sessionId,
+          lastMessage: m.text,
+          updatedAt: m.createdAt,
+          unread: 0   // ⭐ 추가 (안읽음 카운트)
+        };
+      }
+
+      // ⭐ user 메시지면서 아직 안읽었으면 증가
+      if (m.from === "user" && !m.read) {
+        sessions[m.sessionId].unread += 1;
+      }
+
+    });
+
+    res.json(Object.values(sessions));
+
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "server error" });
+  }
 });
 
 // ================== START ==================

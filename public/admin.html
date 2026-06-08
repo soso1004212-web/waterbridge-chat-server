@@ -243,6 +243,17 @@ async function openChat(sessionId,lastMessage) {
       <b>Session:</b> ${sessionId}<br>
       <b>최근:</b> ${lastMessage || "-"}
     `;
+  // ✅ 읽음 처리 (관리자가 채팅방 열었을 때)
+  await fetch(API + "/message/read", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify({
+      sessionId,
+      reader: "admin"
+    })
+  });
 
     loadSessions();
 
