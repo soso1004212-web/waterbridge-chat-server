@@ -143,99 +143,163 @@ header{
 const API = "https://waterbridge-chat-server-production.up.railway.app";
 
 const socket = io(API, {
-  transports: ["websocket", "polling"]
-});
-socket.on("connect", () => {
-  console.log("관리자 연결 성공");
-  socket.emit("adminJoin");
+  transports: ["websocket", "polling"],
+  reconnection: true
 });
 
 let currentSession = null;
 
-// ================= SOCKET (실시간) =================
+// 연결 상태
+socket.on("connect", () => {
+  console.log("관리자 연결 성공");
+  socket.emit("adminJoin");
+
+  document.title = "🟢 관리자 상담 패널";
+});
+
+socket.on("disconnect", () => {
+  document.title = "🔴 연결 끊김";
+});
+
+// 실시간 수신
 socket.on("message", (msg) => {
+
   console.log("수신:", msg);
 
-  loadSessions(); // 목록 즉시 갱신
+  loadSessions();
 
   if (msg.sessionId === currentSession) {
     addMessage(msg);
   }
 });
-// ================= LOAD SESSIONS =================
+
+// 세션목록 불러오기
 async function loadSessions() {
-  const res = await fetch(API + "/admin/sessions");
-  const data = await res.json();
 
-  const box = document.getElementById("sessionList");
-  box.innerHTML = "";
+  try {
 
-  data.forEach(s => {
-    const div = document.createElement("div");
-    div.className = "session" + (s.sessionId === currentSession ? " active" : "");
+    const res = await fetch(API + "/admin/sessions");
 
-    div.innerHTML = `
-      <b>${s.sessionId}</b>
-      <small>${s.lastMessage || ""}</small>
-    `;
+    const data = await res.json();
 
-    div.onclick = () => openChat(s.sessionId, s.lastMessage);
+    const box = document.getElementById("sessionList");
 
-    box.appendChild(div);
-  });
+    box.innerHTML = "";
+
+    data.forEach(s => {
+
+      const div = document.createElement("div");
+
+      div.className =
+        "session" +
+        (s.sessionId === currentSession ? " active" : "");
+
+      div.innerHTML = `
+        <b>${s.sessionId}</b>
+        <small>${s.lastMessage || ""}</small>
+      `;
+
+      div.onclick = () => {
+        openChat(s.sessionId, s.lastMessage);
+      };
+
+      box.appendChild(div);
+
+    });
+
+  } catch(err) {
+    console.error(err);
+  }
 }
 
-// ================= OPEN CHAT =================
-async function openChat(sessionId, lastMessage) {
+// 채팅열기
+async function openChat(sessionId,lastMessage) {
+
   currentSession = sessionId;
 
-  const res = await fetch(API + "/admin/messages/" + sessionId);
-  const data = await res.json();
+  try {
 
-  const box = document.getElementById("chatBox");
-  box.innerHTML = "";
+    const res =
+      await fetch(API + "/admin/messages/" + sessionId);
 
-  data.forEach(addMessage);
+    const data = await res.json();
 
-  document.getElementById("info").innerHTML = `
-    <b>Session:</b> ${sessionId}<br>
-    <b>최근:</b> ${lastMessage || "-"}
-  `;
+    const box =
+      document.getElementById("chatBox");
 
-  loadSessions();
+    box.innerHTML = "";
+
+    data.forEach(addMessage);
+
+    document.getElementById("info").innerHTML = `
+      <b>Session:</b> ${sessionId}<br>
+      <b>최근:</b> ${lastMessage || "-"}
+    `;
+
+    loadSessions();
+
+  } catch(err) {
+    console.error(err);
+  }
 }
 
-// ================= MESSAGE RENDER =================
+// 메시지 출력
 function addMessage(m) {
+
   const box = document.getElementById("chatBox");
 
   const div = document.createElement("div");
+
   div.className = "msg " + m.from;
 
-  div.innerHTML = `<b>${m.from}</b>: ${m.text}`;
+  div.innerHTML =
+    `<b>${m.from}</b> : ${m.text}`;
 
   box.appendChild(div);
+
   box.scrollTop = box.scrollHeight;
 }
 
-// ================= SEND =================
-async function sendMsg() {
-  const input = document.getElementById("msgInput");
-  const text = input.value.trim();
+// 전송
+function sendMsg() {
 
-  if (!text || !currentSession) return;
+  const input =
+    document.getElementById("msgInput");
+
+  const text =
+    input.value.trim();
+
+  if (!text || !currentSession) {
+    alert("고객을 먼저 선택하세요.");
+    return;
+  }
 
   socket.emit("adminMessage", {
     sessionId: currentSession,
-    text: text
+    text
+  });
+
+  // 즉시 화면 표시
+  addMessage({
+    from:"admin",
+    text:text
   });
 
   input.value = "";
 }
 
-setInterval(loadSessions, 3000);
+// 엔터 전송
+document
+.getElementById("msgInput")
+.addEventListener("keydown",(e)=>{
+
+  if(e.key==="Enter"){
+    sendMsg();
+  }
+
+});
+
+setInterval(loadSessions,3000);
+
 loadSessions();
 </script>
-
-</body>
-</html>
