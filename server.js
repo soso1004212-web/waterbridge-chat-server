@@ -1,5 +1,4 @@
 require("dotenv").config();
-
 const express = require("express");
 const http = require("http");
 const cors = require("cors");
@@ -13,28 +12,27 @@ app.use(cors({ origin: "*" }));
 app.use(express.json());
 
 const io = new Server(server, {
-  cors: { origin: "*" }
+  cors: { origin: "*" },
+  pingTimeout: 60000,
 });
 
-/* ================= ENV CHECK ================= */
+/* ================= SAFE ENV CHECK ================= */
 const MONGO_URL = process.env.MONGO_URL;
 
 if (!MONGO_URL) {
-  throw new Error("❌ MONGO_URL이 설정되지 않았습니다 (Railway Variables 확인)");
+  console.error("❌ MONGO_URL 없음 (Railway Variables 확인)");
+  process.exit(1);
 }
 
-/* ================= DB CONNECT ================= */
+/* ================= DB CONNECT (STABLE) ================= */
 mongoose.connect(MONGO_URL)
   .then(() => console.log("🟢 MongoDB 연결 성공"))
   .catch(err => {
-    console.error("🔴 MongoDB 연결 실패:", err);
+    console.error("🔴 MongoDB 연결 실패:", err.message);
     process.exit(1);
   });
 
-mongoose.connection.on("error", err => {
-  console.error("Mongo Error:", err);
-});
-
+/* ================= MODELS ================= */
 const Message = mongoose.model("Message", new mongoose.Schema({
   sessionId: String,
   from: String,
@@ -51,6 +49,7 @@ const Session = mongoose.model("Session", new mongoose.Schema({
 
 /* ================= SOCKET ================= */
 io.on("connection", (socket) => {
+  console.log("🟢 socket connected");
 
   socket.on("join", (sessionId) => {
     if (!sessionId) return;
@@ -60,32 +59,20 @@ io.on("connection", (socket) => {
   socket.on("message", async (data) => {
     try {
       const { sessionId, text, from } = data;
-
       if (!sessionId || !text) return;
 
-      const msg = await Message.create({
-        sessionId,
-        from,
-        text
-      });
+      const msg = await Message.create({ sessionId, from, text });
 
       await Session.findOneAndUpdate(
         { sessionId },
-        {
-          sessionId,
-          lastMessage: text,
-          updatedAt: new Date(),
-          status: "open"
-        },
+        { sessionId, lastMessage: text, updatedAt: new Date() },
         { upsert: true }
       );
 
       io.to(sessionId).emit("message", msg);
 
-      /* ================= AI ================= */
       if (from === "user") {
         setTimeout(async () => {
-
           const aiText = aiEngine(text);
 
           const aiMsg = await Message.create({
@@ -95,18 +82,20 @@ io.on("connection", (socket) => {
           });
 
           io.to(sessionId).emit("message", aiMsg);
-
         }, 600);
       }
 
     } catch (err) {
-      console.error("Socket message error:", err);
+      console.error("socket error:", err.message);
     }
   });
 
+  socket.on("disconnect", () => {
+    console.log("🔴 socket disconnected");
+  });
 });
 
-/* ================= AI ENGINE ================= */
+/* ================= AI ================= */
 function aiEngine(text) {
   text = text.toLowerCase();
 
@@ -118,42 +107,30 @@ function aiEngine(text) {
   return "담당 상담원이 곧 연결됩니다.";
 }
 
-/* ================= ADMIN API ================= */
-
-// 전체 세션
-app.get("/admin/sessions", async (req, res) => {
-  const sessions = await Session.find().sort({ updatedAt: -1 });
-  res.json(sessions);
-});
-
-// 특정 세션 메시지
-app.get("/admin/messages/:sessionId", async (req, res) => {
-  const msgs = await Message.find({ sessionId: req.params.sessionId })
-    .sort({ createdAt: 1 });
-
-  res.json(msgs);
-});
-
-// 세션 종료
-app.post("/admin/close", async (req, res) => {
-  const { sessionId } = req.body;
-
-  await Session.updateOne(
-    { sessionId },
-    { status: "closed", updatedAt: new Date() }
-  );
-
+/* ================= API ================= */
+app.get("/health", (req, res) => {
   res.json({ ok: true });
 });
 
-// 헬스체크
-app.get("/", (req, res) => {
-  res.json({ status: "ok", service: "chat-server" });
+app.get("/sessions", async (req, res) => {
+  const list = await Session.find().sort({ updatedAt: -1 });
+  res.json(list);
+});
+
+app.get("/messages/:sessionId", async (req, res) => {
+  const msgs = await Message.find({ sessionId: req.params.sessionId });
+  res.json(msgs);
+});
+
+app.post("/close", async (req, res) => {
+  const { sessionId } = req.body;
+  await Session.updateOne({ sessionId }, { status: "closed" });
+  res.json({ ok: true });
 });
 
 /* ================= START ================= */
 const PORT = process.env.PORT || 3000;
 
 server.listen(PORT, () => {
-  console.log(`🚀 Chat Server Running on ${PORT}`);
+  console.log("🚀 Server running on port", PORT);
 });
