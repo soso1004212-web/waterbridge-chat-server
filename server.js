@@ -39,6 +39,12 @@ const MessageSchema = new mongoose.Schema({
   sessionId: String,
   text: String,
   from: String,
+
+  adminName: {
+    type: String,
+    default: ""
+  },
+
   createdAt: {
     type: Date,
     default: Date.now,
@@ -46,24 +52,32 @@ const MessageSchema = new mongoose.Schema({
 });
 
 const Message = mongoose.model("Message", MessageSchema);
-
+const onlineUsers = new Map();
 // ================== SOCKET ==================
 io.on("connection", (socket) => {
   console.log("connected:", socket.id);
 
-  socket.on("join", async (sessionId) => {
-    try {
-      socket.join(sessionId);
+socket.on("join", async (sessionId) => {
+  try {
 
-      const history = await Message.find({ sessionId })
-        .sort({ createdAt: 1 })
-        .limit(100);
+    onlineUsers.set(socket.id, sessionId);
 
-      socket.emit("history", history);
-    } catch (err) {
-      console.error("join error:", err);
-    }
-  });
+    io.to("admin").emit("userOnline", {
+      sessionId
+    });
+
+    socket.join(sessionId);
+
+    const history = await Message.find({ sessionId })
+      .sort({ createdAt: 1 })
+      .limit(100);
+
+    socket.emit("history", history);
+
+  } catch (err) {
+    console.error("join error:", err);
+  }
+});
 
   socket.on("adminJoin", () => {
     socket.join("admin");
@@ -84,24 +98,44 @@ io.on("connection", (socket) => {
     }
   });
 
-  socket.on("adminMessage", async (data) => {
-    try {
-      const msg = await Message.create({
-        sessionId: data.sessionId,
-        text: data.text,
-        from: "admin",
-      });
+socket.on("adminMessage", async (data) => {
+  try {
 
-      io.to(data.sessionId).emit("message", msg);
-      io.to("admin").emit("message", msg);
-    } catch (err) {
-      console.error("adminMessage error:", err);
-    }
-  });
+    const msg = await Message.create({
+      sessionId: data.sessionId,
+      text: data.text,
+      from: "admin",
+      adminName: data.adminName || "상담원"
+    });
 
-  socket.on("disconnect", () => {
-    console.log("disconnected:", socket.id);
-  });
+    io.to(data.sessionId).emit("message", msg);
+    io.to("admin").emit("message", msg);
+
+  } catch (err) {
+    console.error("adminMessage error:", err);
+  }
+});
+
+socket.on("endChat", ({ sessionId }) => {
+
+  io.to(sessionId).emit("chatEnded");
+
+});
+
+socket.on("disconnect", () => {
+
+  const sessionId = onlineUsers.get(socket.id);
+
+  if (sessionId) {
+
+    io.to("admin").emit("userOffline", {
+      sessionId
+    });
+
+    onlineUsers.delete(socket.id);
+  }
+
+  console.log("disconnected:", socket.id);
 });
 
 // ================== API ==================

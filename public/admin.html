@@ -164,6 +164,14 @@ socket.on("disconnect", () => {
 // 실시간 수신
 socket.on("message", (msg) => {
 
+socket.on("userOnline", (data) => {
+  console.log("접속:", data.sessionId);
+});
+
+socket.on("userOffline", (data) => {
+  console.log("이탈:", data.sessionId);
+});
+
   console.log("수신:", msg);
 
   loadSessions();
@@ -274,10 +282,11 @@ function sendMsg() {
     return;
   }
 
-  socket.emit("adminMessage", {
-    sessionId: currentSession,
-    text
-  });
+socket.emit("adminMessage", {
+  sessionId: currentSession,
+  text,
+  adminName: "김철주"
+});
 
   // 즉시 화면 표시
   addMessage({
