@@ -4,6 +4,7 @@ const http = require("http");
 const cors = require("cors");
 const { Server } = require("socket.io");
 const mongoose = require("mongoose");
+const path = require("path");
 
 const app = express();
 const server = http.createServer(app);
@@ -16,6 +17,11 @@ const io = new Server(server, {
   pingTimeout: 60000,
 });
 
+/* ================= ROOT ROUTE (핵심 추가) ================= */
+app.get("/", (req, res) => {
+  res.send("워터브릿지 채팅 서버 정상 작동 🚀");
+});
+
 /* ================= SAFE ENV CHECK ================= */
 const MONGO_URL = process.env.MONGO_URL;
 
@@ -24,7 +30,7 @@ if (!MONGO_URL) {
   process.exit(1);
 }
 
-/* ================= DB CONNECT (STABLE) ================= */
+/* ================= DB CONNECT ================= */
 mongoose.connect(MONGO_URL)
   .then(() => console.log("🟢 MongoDB 연결 성공"))
   .catch(err => {
@@ -127,9 +133,12 @@ app.post("/close", async (req, res) => {
   await Session.updateOne({ sessionId }, { status: "closed" });
   res.json({ ok: true });
 });
+
+/* ================= ADMIN PAGE (수정됨) ================= */
 app.get("/admin", (req, res) => {
-  res.sendFile(__dirname + "public/admin.html");
+  res.sendFile(path.join(__dirname, "public", "admin.html"));
 });
+
 /* ================= START ================= */
 const PORT = process.env.PORT || 3000;
 
