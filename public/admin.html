@@ -7,108 +7,30 @@
 <script src="/socket.io/socket.io.js"></script>
 
 <style>
-body{
-  margin:0;
-  font-family:Arial;
-  background:#0b1220;
-  color:#fff;
-}
+body{margin:0;font-family:Arial;background:#0b1220;color:#fff;}
+header{padding:15px 20px;background:#111a2c;color:#d4af37;font-size:20px;font-weight:700;}
+.wrapper{display:flex;height:92vh;}
 
-header{
-  padding:15px 20px;
-  background:#111a2c;
-  color:#d4af37;
-  font-size:20px;
-  font-weight:700;
-}
+.left{width:25%;border-right:1px solid #222;overflow-y:auto;background:#0e1628;}
+.session{padding:15px;border-bottom:1px solid #1f2a44;cursor:pointer;}
+.session:hover{background:#111a2c;}
+.session.active{background:#1a2742;border-left:4px solid #d4af37;}
+.session small{display:block;color:#aaa;margin-top:5px;}
 
-.wrapper{
-  display:flex;
-  height:92vh;
-}
+.center{width:50%;display:flex;flex-direction:column;}
+.chatBox{flex:1;padding:15px;overflow-y:auto;background:#111a2c;}
 
-.left{
-  width:25%;
-  border-right:1px solid #222;
-  overflow-y:auto;
-  background:#0e1628;
-}
+.msg{margin:10px 0;}
+.user{color:#fff;}
+.admin{color:#4fc3f7;}
+.system{color:#d4af37;}
 
-.session{
-  padding:15px;
-  border-bottom:1px solid #1f2a44;
-  cursor:pointer;
-}
+.inputBox{display:flex;border-top:1px solid #222;}
+.inputBox input{flex:1;padding:15px;border:none;outline:none;background:#0b1220;color:#fff;}
+.inputBox button{padding:0 20px;background:#d4af37;border:none;font-weight:700;cursor:pointer;}
 
-.session:hover{
-  background:#111a2c;
-}
-
-.session.active{
-  background:#1a2742;
-  border-left:4px solid #d4af37;
-}
-
-.session small{
-  display:block;
-  color:#aaa;
-  margin-top:5px;
-}
-
-.center{
-  width:50%;
-  display:flex;
-  flex-direction:column;
-}
-
-.chatBox{
-  flex:1;
-  padding:15px;
-  overflow-y:auto;
-  background:#111a2c;
-}
-
-.msg{
-  margin:10px 0;
-}
-
-.user{ color:#fff; }
-.admin{ color:#4fc3f7; }
-
-.inputBox{
-  display:flex;
-  border-top:1px solid #222;
-}
-
-.inputBox input{
-  flex:1;
-  padding:15px;
-  border:none;
-  outline:none;
-  background:#0b1220;
-  color:#fff;
-}
-
-.inputBox button{
-  padding:0 20px;
-  background:#d4af37;
-  border:none;
-  font-weight:700;
-  cursor:pointer;
-}
-
-.right{
-  width:25%;
-  border-left:1px solid #222;
-  background:#0e1628;
-  padding:15px;
-}
-
-.infoBox{
-  background:#111a2c;
-  padding:15px;
-  border-radius:10px;
-}
+.right{width:25%;border-left:1px solid #222;background:#0e1628;padding:15px;}
+.infoBox{background:#111a2c;padding:15px;border-radius:10px;}
 </style>
 </head>
 
@@ -140,47 +62,25 @@ header{
 
 <script>
 const API = "https://waterbridge-chat-server-production.up.railway.app";
-
-const socket = io(API, {
-  transports: ["websocket", "polling"]
-});
+const socket = io(API);
 
 let currentSession = null;
 
 // ================= CONNECT =================
 socket.on("connect", () => {
-  console.log("관리자 연결 성공");
   socket.emit("adminJoin");
 });
 
-// ================= REALTIME MESSAGE =================
+// ================= MESSAGE (핵심 수정) =================
 socket.on("message", (msg) => {
-  console.log("수신:", msg);
 
-  loadSessions();
-
+  // 현재 보고 있는 세션만 출력
   if (msg.sessionId === currentSession) {
     addMessage(msg);
   }
-});
 
-// ================= ONLINE STATUS =================
-socket.on("userOnline", (data) => {
-  console.log("접속:", data.sessionId);
-});
-
-socket.on("userOffline", (data) => {
-  console.log("이탈:", data.sessionId);
-});
-
-// ================= CHAT END =================
-socket.on("chatEnded", () => {
-  addMessage({
-    from: "system",
-    text: "⛔ 상담이 종료되었습니다."
-  });
-
-  document.getElementById("msgInput").disabled = true;
+  // 목록은 갱신만
+  loadSessions();
 });
 
 // ================= SESSION LIST =================
@@ -193,26 +93,26 @@ async function loadSessions() {
 
   data.forEach(s => {
     const div = document.createElement("div");
-
-    div.className =
-      "session" +
-      (s.sessionId === currentSession ? " active" : "");
+    div.className = "session" + (s.sessionId === currentSession ? " active" : "");
 
     div.innerHTML = `
       <b>${s.sessionId}</b>
       <small>${s.lastMessage || ""}</small>
     `;
 
-    div.onclick = () => openChat(s.sessionId, s.lastMessage);
+    div.onclick = () => openChat(s.sessionId);
 
     box.appendChild(div);
   });
 }
 
-// ================= OPEN CHAT =================
-async function openChat(sessionId, lastMessage) {
+// ================= OPEN CHAT (핵심 수정) =================
+async function openChat(sessionId) {
 
   currentSession = sessionId;
+
+  // 🔥 중요: 서버에서 방 입장
+  socket.emit("join", sessionId);
 
   const res = await fetch(API + "/admin/messages/" + sessionId);
   const data = await res.json();
@@ -223,16 +123,8 @@ async function openChat(sessionId, lastMessage) {
   data.forEach(addMessage);
 
   document.getElementById("info").innerHTML = `
-    <b>Session:</b> ${sessionId}<br>
-    <b>최근:</b> ${lastMessage || "-"}
+    <b>Session:</b> ${sessionId}
   `;
-
-  // 읽음 처리
-  await fetch(API + "/admin/read/" + sessionId, {
-    method: "POST"
-  });
-
-  document.getElementById("msgInput").disabled = false;
 
   loadSessions();
 }
@@ -259,18 +151,11 @@ function sendMsg() {
 
   socket.emit("adminMessage", {
     sessionId: currentSession,
-    text,
-    adminName: "김철주"
+    text
   });
 
   input.value = "";
 }
-
-// ENTER SEND
-document.getElementById("msgInput")
-.addEventListener("keydown", (e) => {
-  if (e.key === "Enter") sendMsg();
-});
 
 setInterval(loadSessions, 3000);
 loadSessions();
