@@ -17,6 +17,7 @@ const io = new Server(server, {
 });
 
 // ================== DB CHECK ==================
+console.log("MONGO_URI =", process.env.MONGO_URI);
 if (!process.env.MONGO_URI) {
   console.error("❌ MONGO_URI is missing");
   process.exit(1);
