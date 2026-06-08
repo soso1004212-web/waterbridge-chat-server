@@ -1,150 +1,10 @@
-<!DOCTYPE html>
-<html lang="ko">
-<head>
-<meta charset="UTF-8">
-<title>관리자 상담 패널</title>
-
-<script src="/socket.io/socket.io.js"></script>
-
-<style>
-body{
-  margin:0;
-  font-family:Arial;
-  background:#0b1220;
-  color:#fff;
-}
-
-header{
-  padding:15px 20px;
-  background:#111a2c;
-  color:#d4af37;
-  font-size:20px;
-  font-weight:700;
-}
-
-.wrapper{
-  display:flex;
-  height:92vh;
-}
-
-.left{
-  width:25%;
-  border-right:1px solid #222;
-  overflow-y:auto;
-  background:#0e1628;
-}
-
-.session{
-  padding:15px;
-  border-bottom:1px solid #1f2a44;
-  cursor:pointer;
-}
-
-.session:hover{
-  background:#111a2c;
-}
-
-.session.active{
-  background:#1a2742;
-  border-left:4px solid #d4af37;
-}
-
-.session small{
-  display:block;
-  color:#aaa;
-  margin-top:5px;
-}
-
-.center{
-  width:50%;
-  display:flex;
-  flex-direction:column;
-}
-
-.chatBox{
-  flex:1;
-  padding:15px;
-  overflow-y:auto;
-  background:#111a2c;
-}
-
-.msg{
-  margin:10px 0;
-}
-
-.user{ color:#fff; }
-.admin{ color:#4fc3f7; }
-.bot{ color:#d4af37; }
-
-.inputBox{
-  display:flex;
-  border-top:1px solid #222;
-}
-
-.inputBox input{
-  flex:1;
-  padding:15px;
-  border:none;
-  outline:none;
-  background:#0b1220;
-  color:#fff;
-}
-
-.inputBox button{
-  padding:0 20px;
-  background:#d4af37;
-  border:none;
-  font-weight:700;
-  cursor:pointer;
-}
-
-.right{
-  width:25%;
-  border-left:1px solid #222;
-  background:#0e1628;
-  padding:15px;
-}
-
-.infoBox{
-  background:#111a2c;
-  padding:15px;
-  border-radius:10px;
-}
-</style>
-</head>
-
-<body>
-
-<header>관리자 상담 패널</header>
-
-<div class="wrapper">
-
-  <div class="left" id="sessionList"></div>
-
-  <div class="center">
-    <div class="chatBox" id="chatBox">고객을 선택하세요</div>
-
-    <div class="inputBox">
-      <input id="msgInput" placeholder="답장 입력">
-      <button onclick="sendMsg()">전송</button>
-    </div>
-  </div>
-
-  <div class="right">
-    <div class="infoBox">
-      <h3>고객 정보</h3>
-      <div id="info">없음</div>
-    </div>
-  </div>
-
-</div>
-
 <script>
 const API = "https://waterbridge-chat-server-production.up.railway.app";
 
 const socket = io(API, {
   transports: ["websocket", "polling"]
 });
+
 socket.on("connect", () => {
   console.log("관리자 연결 성공");
   socket.emit("adminJoin");
@@ -152,14 +12,12 @@ socket.on("connect", () => {
 
 let currentSession = null;
 
-// ================= SOCKET (실시간) =================
+// ================= SOCKET =================
 socket.on("message", (msg) => {
-  console.log("수신:", msg);
-
   if (msg.sessionId !== currentSession) return;
-
   addMessage(msg);
 });
+
 // ================= LOAD SESSIONS =================
 async function loadSessions() {
   const res = await fetch(API + "/admin/sessions");
@@ -216,8 +74,8 @@ function addMessage(m) {
   box.scrollTop = box.scrollHeight;
 }
 
-// ================= SEND =================
-async function sendMsg() {
+// ================= SEND (버튼 + 엔터 공용) =================
+window.sendMsg = function () {
   const input = document.getElementById("msgInput");
   const text = input.value.trim();
 
@@ -229,4 +87,13 @@ async function sendMsg() {
   });
 
   input.value = "";
-}
+};
+
+// ================= ENTER KEY 전송 =================
+document.getElementById("msgInput").addEventListener("keydown", function (e) {
+  if (e.key === "Enter") {
+    e.preventDefault(); // 줄바꿈 방지
+    sendMsg();
+  }
+});
+</script>
