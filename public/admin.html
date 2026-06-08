@@ -3,7 +3,6 @@ const API = "https://waterbridge-chat-server-production.up.railway.app";
 const socket = io(API);
 
 let currentSession = null;
-let joinedSession = null;
 
 // ================= CONNECT =================
 socket.on("connect", () => {
@@ -12,24 +11,11 @@ socket.on("connect", () => {
 
 // ================= MESSAGE =================
 socket.on("chat:message", (msg) => {
-
   if (msg.sessionId === currentSession) {
     addMessage(msg);
   }
-
   loadSessions();
 });
-
-// ================= SESSION UPDATE =================
-let reloadTimer = null;
-
-function safeReload() {
-  clearTimeout(reloadTimer);
-  reloadTimer = setTimeout(loadSessions, 200);
-}
-
-socket.on("admin:user_online", safeReload);
-socket.on("admin:user_offline", safeReload);
 
 // ================= SESSION LIST =================
 async function loadSessions() {
@@ -44,7 +30,7 @@ async function loadSessions() {
     div.className = "session" + (s.sessionId === currentSession ? " active" : "");
 
     div.innerHTML = `
-      <b>${s.sessionId}</b>
+      <b>${s.sessionId}</b><br/>
       <small>${s.lastMessage || ""}</small>
     `;
 
@@ -55,14 +41,8 @@ async function loadSessions() {
 
 // ================= OPEN CHAT =================
 async function openChat(sessionId) {
-
-  // 🔥 기존 room 완전 정리
-  socket.emit("session:leave");
-
   currentSession = sessionId;
-  joinedSession = sessionId;
 
-  // 🔥 중요: admin watch
   socket.emit("admin:watch", sessionId);
 
   const res = await fetch(API + "/admin/messages/" + sessionId);
@@ -73,21 +53,23 @@ async function openChat(sessionId) {
 
   data.forEach(addMessage);
 
-  document.getElementById("info").innerHTML = `
-    <b>Session:</b> ${sessionId}
-  `;
+  document.getElementById("info").innerHTML =
+    `<b>Session:</b> ${sessionId}`;
 
   loadSessions();
 }
 
-// ================= ADD MESSAGE =================
+// ================= MESSAGE UI =================
 function addMessage(m) {
   const box = document.getElementById("chatBox");
 
   const div = document.createElement("div");
   div.className = "msg " + m.from;
 
-  div.innerHTML = `<b>${m.from}</b>: ${m.text}`;
+  div.innerHTML = `
+    <div><b>${m.from}</b></div>
+    <div>${m.text}</div>
+  `;
 
   box.appendChild(div);
   box.scrollTop = box.scrollHeight;
@@ -108,6 +90,10 @@ function sendMsg() {
 
   input.value = "";
 }
+
+document.getElementById("msgInput").addEventListener("keydown", e => {
+  if (e.key === "Enter") sendMsg();
+});
 
 loadSessions();
 </script>
