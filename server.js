@@ -39,30 +39,30 @@ const MessageSchema = new mongoose.Schema({
   sessionId: String,
   text: String,
   from: String,
-  createdAt: {
-    type: Date,
-    default: Date.now,
-  },
+  adminName: { type: String, default: "" },
+  createdAt: { type: Date, default: Date.now }
 });
 
 const Message = mongoose.model("Message", MessageSchema);
+
+const onlineUsers = new Map();
 
 // ================== SOCKET ==================
 io.on("connection", (socket) => {
   console.log("connected:", socket.id);
 
   socket.on("join", async (sessionId) => {
-    try {
-      socket.join(sessionId);
+    onlineUsers.set(socket.id, sessionId);
 
-      const history = await Message.find({ sessionId })
-        .sort({ createdAt: 1 })
-        .limit(100);
+    socket.join(sessionId);
 
-      socket.emit("history", history);
-    } catch (err) {
-      console.error("join error:", err);
-    }
+    io.to("admin").emit("userOnline", { sessionId });
+
+    const history = await Message.find({ sessionId })
+      .sort({ createdAt: 1 })
+      .limit(100);
+
+    socket.emit("history", history);
   });
 
   socket.on("adminJoin", () => {
@@ -70,99 +70,72 @@ io.on("connection", (socket) => {
   });
 
   socket.on("message", async (data) => {
-    try {
-      const msg = await Message.create({
-        sessionId: data.sessionId,
-        text: data.text,
-        from: data.from || "user",
-      });
+    const msg = await Message.create({
+      sessionId: data.sessionId,
+      text: data.text,
+      from: "user"
+    });
 
-      io.to(data.sessionId).emit("message", msg);
-      io.to("admin").emit("message", msg);
-    } catch (err) {
-      console.error("message error:", err);
-    }
+    io.to(data.sessionId).emit("message", msg);
+    io.to("admin").emit("message", msg);
   });
 
   socket.on("adminMessage", async (data) => {
-    try {
-      const msg = await Message.create({
-        sessionId: data.sessionId,
-        text: data.text,
-        from: "admin",
-      });
+    const msg = await Message.create({
+      sessionId: data.sessionId,
+      text: data.text,
+      from: "admin",
+      adminName: data.adminName || "상담원"
+    });
 
-      io.to(data.sessionId).emit("message", msg);
-      io.to("admin").emit("message", msg);
-    } catch (err) {
-      console.error("adminMessage error:", err);
-    }
+    io.to(data.sessionId).emit("message", msg);
+    io.to("admin").emit("message", msg);
+  });
+
+  socket.on("endChat", ({ sessionId }) => {
+    io.to(sessionId).emit("chatEnded");
   });
 
   socket.on("disconnect", () => {
-    console.log("disconnected:", socket.id);
+    const sessionId = onlineUsers.get(socket.id);
+    if (sessionId) {
+      io.to("admin").emit("userOffline", { sessionId });
+      onlineUsers.delete(socket.id);
+    }
   });
 });
 
 // ================== API ==================
 app.get("/admin/messages/:sessionId", async (req, res) => {
-  try {
-    const data = await Message.find({
-      sessionId: req.params.sessionId,
-    }).sort({ createdAt: 1 });
-
-    res.json(data);
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: "server error" });
-  }
+  const data = await Message.find({ sessionId: req.params.sessionId }).sort({ createdAt: 1 });
+  res.json(data);
 });
 
 app.get("/admin/sessions", async (req, res) => {
-  try {
-    const messages = await Message.find().sort({
-      createdAt: -1,
-    });
+  const messages = await Message.find().sort({ createdAt: -1 });
 
-    const sessions = {};
+  const sessions = {};
+  messages.forEach((m) => {
+    if (!sessions[m.sessionId]) {
+      sessions[m.sessionId] = {
+        sessionId: m.sessionId,
+        lastMessage: m.text,
+        updatedAt: m.createdAt
+      };
+    }
+  });
 
-    messages.forEach((m) => {
-      if (!sessions[m.sessionId]) {
-        sessions[m.sessionId] = {
-          sessionId: m.sessionId,
-          lastMessage: m.text,
-          updatedAt: m.createdAt,
-        };
-      }
-    });
-
-    res.json(Object.values(sessions));
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: "server error" });
-  }
+  res.json(Object.values(sessions));
 });
 
 // ================== START ==================
 async function start() {
-  try {
-    await mongoose.connect(process.env.MONGO_URI, {
-      maxPoolSize: 10,
-      serverSelectionTimeoutMS: 5000,
-      socketTimeoutMS: 45000,
-    });
+  await mongoose.connect(process.env.MONGO_URI);
 
-    console.log("✅ MongoDB connected");
-
-    const PORT = process.env.PORT || 3000;
-
-    server.listen(PORT, () => {
-      console.log(`🚀 server running on ${PORT}`);
-    });
-  } catch (err) {
-    console.error("❌ MongoDB connection failed:", err);
-    process.exit(1);
-  }
+  const PORT = process.env.PORT || 3000;
+  server.listen(PORT, () => {
+    console.log("🚀 server running on", PORT);
+  });
 }
 
 start();
