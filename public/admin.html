@@ -142,18 +142,24 @@ header{
 <script>
 const API = "https://waterbridge-chat-server-production.up.railway.app";
 
-const socket = io();
-socket.emit("adminJoin");
+const socket = io(API, {
+  transports: ["websocket", "polling"]
+});
+socket.on("connect", () => {
+  console.log("관리자 연결 성공");
+  socket.emit("adminJoin");
+});
 
 let currentSession = null;
 
 // ================= SOCKET (실시간) =================
 socket.on("message", (msg) => {
+  console.log("수신:", msg);
+
   if (msg.sessionId !== currentSession) return;
 
   addMessage(msg);
 });
-
 // ================= LOAD SESSIONS =================
 async function loadSessions() {
   const res = await fetch(API + "/admin/sessions");
