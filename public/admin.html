@@ -1,162 +1,190 @@
 <!DOCTYPE html>
 <html lang="ko">
 <head>
-<meta charset="UTF-8" />
-<title>Admin Chat</title>
+<meta charset="UTF-8">
+<title>관리자 상담 패널</title>
 
 <script src="/socket.io/socket.io.js"></script>
 
 <style>
-body {
-  margin: 0;
-  background: #0b1220;
-  color: white;
-  font-family: Arial;
-  display: flex;
-  height: 100vh;
+body{
+  margin:0;
+  font-family:Arial;
+  background:#0b1220;
+  color:#fff;
 }
 
-/* 좌측 세션 */
-#sessionList {
-  width: 280px;
-  border-right: 1px solid #222;
-  overflow-y: auto;
+header{
+  padding:15px 20px;
+  background:#111a2c;
+  color:#d4af37;
+  font-size:20px;
+  font-weight:700;
 }
 
-.session {
-  padding: 12px;
-  cursor: pointer;
-  border-bottom: 1px solid #1a2233;
+.wrapper{
+  display:flex;
+  height:92vh;
 }
 
-.session:hover {
-  background: #111a2b;
+.left{
+  width:25%;
+  border-right:1px solid #222;
+  overflow-y:auto;
+  background:#0e1628;
 }
 
-.session.active {
-  background: #1f2a44;
+.session{
+  padding:15px;
+  border-bottom:1px solid #1f2a44;
+  cursor:pointer;
 }
 
-/* 우측 */
-#chatArea {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
+.session:hover{
+  background:#111a2c;
 }
 
-#info {
-  padding: 10px;
-  border-bottom: 1px solid #222;
-  font-size: 13px;
-  color: #aaa;
+.session.active{
+  background:#1a2742;
+  border-left:4px solid #d4af37;
 }
 
-#chatBox {
-  flex: 1;
-  overflow-y: auto;
-  padding: 20px;
+.session small{
+  display:block;
+  color:#aaa;
+  margin-top:5px;
 }
 
-/* 입력 */
-#inputBox {
-  display: flex;
-  padding: 10px;
-  border-top: 1px solid #222;
+.center{
+  width:50%;
+  display:flex;
+  flex-direction:column;
 }
 
-#msgInput {
-  flex: 1;
-  padding: 10px;
-  border-radius: 8px;
-  border: none;
-  outline: none;
-  background: #111a2b;
-  color: white;
+.chatBox{
+  flex:1;
+  padding:15px;
+  overflow-y:auto;
+  background:#111a2c;
 }
 
-button {
-  margin-left: 10px;
-  padding: 10px 16px;
-  background: #4f7cff;
-  border: none;
-  color: white;
-  border-radius: 8px;
-  cursor: pointer;
+.msg{
+  margin:10px 0;
+}
+
+.user{ color:#fff; }
+.admin{ color:#4fc3f7; }
+.bot{ color:#d4af37; }
+
+.inputBox{
+  display:flex;
+  border-top:1px solid #222;
+}
+
+.inputBox input{
+  flex:1;
+  padding:15px;
+  border:none;
+  outline:none;
+  background:#0b1220;
+  color:#fff;
+}
+
+.inputBox button{
+  padding:0 20px;
+  background:#d4af37;
+  border:none;
+  font-weight:700;
+  cursor:pointer;
+}
+
+.right{
+  width:25%;
+  border-left:1px solid #222;
+  background:#0e1628;
+  padding:15px;
+}
+
+.infoBox{
+  background:#111a2c;
+  padding:15px;
+  border-radius:10px;
 }
 </style>
 </head>
 
 <body>
 
-<div id="sessionList"></div>
+<header>관리자 상담 패널</header>
 
-<div id="chatArea">
-  <div id="info">세션 선택</div>
-  <div id="chatBox"></div>
+<div class="wrapper">
 
-  <div id="inputBox">
-    <input id="msgInput" placeholder="메시지 입력..." />
-    <button onclick="sendMsg()">전송</button>
+  <div class="left" id="sessionList"></div>
+
+  <div class="center">
+    <div class="chatBox" id="chatBox">고객을 선택하세요</div>
+
+    <div class="inputBox">
+      <input id="msgInput" placeholder="답장 입력">
+      <button onclick="sendMsg()">전송</button>
+    </div>
   </div>
+
+  <div class="right">
+    <div class="infoBox">
+      <h3>고객 정보</h3>
+      <div id="info">없음</div>
+    </div>
+  </div>
+
 </div>
 
 <script>
 const API = "https://waterbridge-chat-server-production.up.railway.app";
-const socket = io(API);
+
+const socket = io(API, {
+  transports: ["websocket", "polling"]
+});
+socket.on("connect", () => {
+  console.log("관리자 연결 성공");
+  socket.emit("adminJoin");
+});
 
 let currentSession = null;
-let sessionCache = [];
 
-// ================= CONNECT =================
-socket.on("connect", () => {
-  console.log("connected:", socket.id);
+// ================= SOCKET (실시간) =================
+socket.on("message", (msg) => {
+  console.log("수신:", msg);
+
+  if (msg.sessionId !== currentSession) return;
+
+  addMessage(msg);
 });
-
-// ================= REALTIME =================
-socket.on("chat:message", (msg) => {
-  if (msg.sessionId === currentSession) {
-    addMessage(msg);
-  }
-  loadSessions();
-});
-
-// ================= AUTO REFRESH =================
-setInterval(loadSessions, 1000);
-
-// ================= SESSION LIST =================
+// ================= LOAD SESSIONS =================
 async function loadSessions() {
-  try {
-    const res = await fetch(API + "/admin/sessions");
-    const data = await res.json();
+  const res = await fetch(API + "/admin/sessions");
+  const data = await res.json();
 
-    if (JSON.stringify(data) === JSON.stringify(sessionCache)) return;
-    sessionCache = data;
+  const box = document.getElementById("sessionList");
+  box.innerHTML = "";
 
-    const box = document.getElementById("sessionList");
-    box.innerHTML = "";
+  data.forEach(s => {
+    const div = document.createElement("div");
+    div.className = "session" + (s.sessionId === currentSession ? " active" : "");
 
-    data.forEach(s => {
-      const div = document.createElement("div");
-      div.className = "session" + (s.sessionId === currentSession ? " active" : "");
+    div.innerHTML = `
+      <b>${s.sessionId}</b>
+      <small>${s.lastMessage || ""}</small>
+    `;
 
-      div.innerHTML = `
-        <div style="font-weight:600;">${s.sessionId}</div>
-        <div style="font-size:12px;color:#aaa;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">
-          ${s.lastMessage || ""}
-        </div>
-      `;
+    div.onclick = () => openChat(s.sessionId, s.lastMessage);
 
-      div.onclick = () => openChat(s.sessionId);
-      box.appendChild(div);
-    });
-
-  } catch (e) {
-    console.log("session error", e);
-  }
+    box.appendChild(div);
+  });
 }
 
 // ================= OPEN CHAT =================
-async function openChat(sessionId) {
+async function openChat(sessionId, lastMessage) {
   currentSession = sessionId;
 
   const res = await fetch(API + "/admin/messages/" + sessionId);
@@ -168,82 +196,37 @@ async function openChat(sessionId) {
   data.forEach(addMessage);
 
   document.getElementById("info").innerHTML = `
-    💬 상담중<br/>
-    <span style="font-size:12px;color:#888">${sessionId}</span>
+    <b>Session:</b> ${sessionId}<br>
+    <b>최근:</b> ${lastMessage || "-"}
   `;
 
-  scrollBottom();
   loadSessions();
 }
 
-// ================= MESSAGE UI =================
+// ================= MESSAGE RENDER =================
 function addMessage(m) {
   const box = document.getElementById("chatBox");
 
-  const wrap = document.createElement("div");
-  wrap.style.display = "flex";
-  wrap.style.margin = "6px 0";
-  wrap.style.justifyContent = m.from === "admin" ? "flex-end" : "flex-start";
+  const div = document.createElement("div");
+  div.className = "msg " + m.from;
 
-  const bubble = document.createElement("div");
+  div.innerHTML = `<b>${m.from}</b>: ${m.text}`;
 
-  bubble.style.maxWidth = "65%";
-  bubble.style.padding = "10px 14px";
-  bubble.style.borderRadius = "16px";
-  bubble.style.fontSize = "14px";
-  bubble.style.wordBreak = "break-word";
-
-  if (m.from === "admin") {
-    bubble.style.background = "#4f7cff";
-    bubble.style.color = "white";
-    bubble.style.borderTopRightRadius = "4px";
-  } else {
-    bubble.style.background = "#1f2937";
-    bubble.style.color = "white";
-    bubble.style.borderTopLeftRadius = "4px";
-  }
-
-  bubble.innerHTML = `
-    <div style="font-size:11px;opacity:0.7;margin-bottom:4px;">
-      ${m.from === "admin" ? "나" : "고객"}
-    </div>
-    <div>${m.text}</div>
-  `;
-
-  wrap.appendChild(bubble);
-  box.appendChild(wrap);
-
-  scrollBottom();
-}
-
-// ================= SCROLL =================
-function scrollBottom() {
-  const box = document.getElementById("chatBox");
+  box.appendChild(div);
   box.scrollTop = box.scrollHeight;
 }
 
 // ================= SEND =================
-function sendMsg() {
+async function sendMsg() {
   const input = document.getElementById("msgInput");
   const text = input.value.trim();
 
   if (!text || !currentSession) return;
 
-  socket.emit("admin:message", {
+  socket.emit("adminMessage", {
     sessionId: currentSession,
-    text
+    text: text
   });
 
   input.value = "";
 }
-
-// ENTER
-document.getElementById("msgInput").addEventListener("keydown", e => {
-  if (e.key === "Enter") sendMsg();
-});
-
-loadSessions();
-</script>
-
-</body>
-</html>

@@ -1,119 +1,168 @@
+require("dotenv").config();
 const express = require("express");
 const http = require("http");
+const cors = require("cors");
 const { Server } = require("socket.io");
+const mongoose = require("mongoose");
+const path = require("path");
 
 const app = express();
 const server = http.createServer(app);
 
-const io = new Server(server, {
-  cors: { origin: "*" }
-});
-
-const PORT = process.env.PORT || 3000;
-
+app.use(cors({ origin: "*" }));
 app.use(express.json());
 
-// =====================
-// MEMORY DB
-// =====================
-const sessions = {};
-/*
-sessions = {
-  sessionId: {
-    messages: []
-  }
-}
-*/
+// ================== STATIC ==================
+app.use(express.static(path.join(__dirname, "public")));
 
-// =====================
-// SOCKET CONNECTION
-// =====================
+app.get("/", (req, res) => {
+  res.send("Chat Server Running");
+});
+
+app.get("/admin", (req, res) => {
+  res.sendFile(path.join(__dirname, "public", "admin.html"));
+});
+
+const io = new Server(server, {
+  cors: { origin: "*" },
+  pingTimeout: 60000,
+});
+
+// ================== DB CHECK ==================
+if (!process.env.MONGO_URI) {
+  console.error("❌ MONGO_URI is missing");
+  process.exit(1);
+}
+
+// ================== MODEL ==================
+const MessageSchema = new mongoose.Schema({
+  sessionId: String,
+  text: String,
+  from: String,
+  createdAt: {
+    type: Date,
+    default: Date.now,
+  },
+});
+
+const Message = mongoose.model("Message", MessageSchema);
+
+// ================== SOCKET ==================
 io.on("connection", (socket) => {
   console.log("connected:", socket.id);
 
-  // =====================
-  // USER MESSAGE
-  // =====================
-  socket.on("user:message", (data) => {
-    const sessionId = data.sessionId || socket.id;
-    const text = data.text;
+  socket.on("join", async (sessionId) => {
+    try {
+      socket.join(sessionId);
 
-    if (!text) return;
+      const history = await Message.find({ sessionId })
+        .sort({ createdAt: 1 })
+        .limit(100);
 
-    if (!sessions[sessionId]) {
-      sessions[sessionId] = { messages: [] };
+      socket.emit("history", history);
+    } catch (err) {
+      console.error("join error:", err);
     }
-
-    const msg = {
-      sessionId,
-      text,
-      from: "user",
-      time: Date.now()
-    };
-
-    sessions[sessionId].messages.push(msg);
-
-    io.emit("chat:message", msg);
   });
 
-  // =====================
-  // ADMIN MESSAGE
-  // =====================
-  socket.on("admin:message", (data) => {
-    const sessionId = data.sessionId;
-    const text = data.text;
+  socket.on("adminJoin", () => {
+    socket.join("admin");
+  });
 
-    if (!sessionId || !text) return;
+  socket.on("message", async (data) => {
+    try {
+      const msg = await Message.create({
+        sessionId: data.sessionId,
+        text: data.text,
+        from: data.from || "user",
+      });
 
-    if (!sessions[sessionId]) {
-      sessions[sessionId] = { messages: [] };
+      io.to(data.sessionId).emit("message", msg);
+      io.to("admin").emit("message", msg);
+    } catch (err) {
+      console.error("message error:", err);
     }
-
-    const msg = {
-      sessionId,
-      text,
-      from: "admin",
-      time: Date.now()
-    };
-
-    sessions[sessionId].messages.push(msg);
-
-    io.emit("chat:message", msg);
   });
 
-  // =====================
-  // DEBUG
-  // =====================
-  socket.onAny((event, data) => {
-    console.log("EVENT:", event, data);
+  socket.on("adminMessage", async (data) => {
+    try {
+      const msg = await Message.create({
+        sessionId: data.sessionId,
+        text: data.text,
+        from: "admin",
+      });
+
+      io.to(data.sessionId).emit("message", msg);
+      io.to("admin").emit("message", msg);
+    } catch (err) {
+      console.error("adminMessage error:", err);
+    }
+  });
+
+  socket.on("disconnect", () => {
+    console.log("disconnected:", socket.id);
   });
 });
 
-// =====================
-// ADMIN API - SESSION LIST
-// =====================
-app.get("/admin/sessions", (req, res) => {
-  const list = Object.keys(sessions).map((sessionId) => ({
-    sessionId,
-    lastMessage:
-      sessions[sessionId]?.messages.slice(-1)[0]?.text || ""
-  }));
+// ================== API ==================
+app.get("/admin/messages/:sessionId", async (req, res) => {
+  try {
+    const data = await Message.find({
+      sessionId: req.params.sessionId,
+    }).sort({ createdAt: 1 });
 
-  res.json(list);
+    res.json(data);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "server error" });
+  }
 });
 
-// =====================
-// ADMIN API - MESSAGES
-// =====================
-app.get("/admin/messages/:sessionId", (req, res) => {
-  const { sessionId } = req.params;
+app.get("/admin/sessions", async (req, res) => {
+  try {
+    const messages = await Message.find().sort({
+      createdAt: -1,
+    });
 
-  res.json(sessions[sessionId]?.messages || []);
+    const sessions = {};
+
+    messages.forEach((m) => {
+      if (!sessions[m.sessionId]) {
+        sessions[m.sessionId] = {
+          sessionId: m.sessionId,
+          lastMessage: m.text,
+          updatedAt: m.createdAt,
+        };
+      }
+    });
+
+    res.json(Object.values(sessions));
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "server error" });
+  }
 });
 
-// =====================
-// START SERVER (ONLY ONCE)
-// =====================
-server.listen(PORT, () => {
-  console.log("Server running on port", PORT);
-});
+// ================== START ==================
+async function start() {
+  try {
+    await mongoose.connect(process.env.MONGO_URI, {
+      maxPoolSize: 10,
+      serverSelectionTimeoutMS: 5000,
+      socketTimeoutMS: 45000,
+    });
+
+    console.log("✅ MongoDB connected");
+
+    const PORT = process.env.PORT || 3000;
+
+    server.listen(PORT, () => {
+      console.log(`🚀 server running on ${PORT}`);
+    });
+  } catch (err) {
+    console.error("❌ MongoDB connection failed:", err);
+    process.exit(1);
+  }
+}
+
+start();
