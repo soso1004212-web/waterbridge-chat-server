@@ -156,9 +156,11 @@ let currentSession = null;
 socket.on("message", (msg) => {
   console.log("수신:", msg);
 
-  if (msg.sessionId !== currentSession) return;
+  loadSessions(); // 목록 즉시 갱신
 
-  addMessage(msg);
+  if (msg.sessionId === currentSession) {
+    addMessage(msg);
+  }
 });
 // ================= LOAD SESSIONS =================
 async function loadSessions() {
@@ -230,3 +232,10 @@ async function sendMsg() {
 
   input.value = "";
 }
+
+setInterval(loadSessions, 3000);
+loadSessions();
+</script>
+
+</body>
+</html>
