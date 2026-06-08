@@ -127,7 +127,9 @@ app.post("/close", async (req, res) => {
   await Session.updateOne({ sessionId }, { status: "closed" });
   res.json({ ok: true });
 });
-
+app.get("/admin", (req, res) => {
+  res.sendFile(__dirname + "public/admin.html");
+});
 /* ================= START ================= */
 const PORT = process.env.PORT || 3000;
 
