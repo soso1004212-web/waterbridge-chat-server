@@ -65,23 +65,28 @@ const API = "https://waterbridge-chat-server-production.up.railway.app";
 const socket = io(API);
 
 let currentSession = null;
+let joinedSession = null;
 
 // ================= CONNECT =================
 socket.on("connect", () => {
-  socket.emit("adminJoin");
+  socket.emit("admin:join");
 });
 
-// ================= MESSAGE (핵심 수정) =================
-socket.on("message", (msg) => {
+// ================= MESSAGE (SaaS 통일) =================
+socket.on("chat:message", (msg) => {
 
   // 현재 보고 있는 세션만 출력
   if (msg.sessionId === currentSession) {
     addMessage(msg);
   }
 
-  // 목록은 갱신만
+  // 세션 리스트 갱신
   loadSessions();
 });
+
+// ================= SESSION EVENTS =================
+socket.on("admin:user_online", loadSessions);
+socket.on("admin:user_offline", loadSessions);
 
 // ================= SESSION LIST =================
 async function loadSessions() {
@@ -106,13 +111,19 @@ async function loadSessions() {
   });
 }
 
-// ================= OPEN CHAT (핵심 수정) =================
+// ================= OPEN CHAT =================
 async function openChat(sessionId) {
 
+  // 🔥 이전 room 완전 제거 (중복 방지 핵심)
+  if (joinedSession) {
+    socket.emit("session:leave");
+  }
+
+  joinedSession = sessionId;
   currentSession = sessionId;
 
-  // 🔥 중요: 서버에서 방 입장
-  socket.emit("join", sessionId);
+  // 🔥 SaaS 구조: join 통일
+  socket.emit("user:join", sessionId);
 
   const res = await fetch(API + "/admin/messages/" + sessionId);
   const data = await res.json();
@@ -149,15 +160,18 @@ function sendMsg() {
 
   if (!text || !currentSession) return;
 
-  socket.emit("adminMessage", {
+  socket.emit("admin:message", {
     sessionId: currentSession,
-    text
+    text,
+    adminName: "상담원"
   });
 
   input.value = "";
 }
 
-setInterval(loadSessions, 3000);
+// ❌ setInterval 제거 (중복/깜빡임 원인)
+// setInterval(loadSessions, 3000);
+
 loadSessions();
 </script>
 
