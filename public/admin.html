@@ -1,36 +1,45 @@
 <!DOCTYPE html>
 <html lang="ko">
 <head>
-<meta charset="UTF-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-<title>관리자 - 실시간 상담</title>
+<meta charset="UTF-8">
+<title>관리자 상담 패널</title>
 
 <style>
 body{
   margin:0;
-  font-family: Arial;
+  font-family:Arial;
   background:#0b1220;
   color:#fff;
-  display:flex;
-  height:100vh;
 }
 
-#left{
-  width:300px;
-  border-right:1px solid #333;
+/* HEADER */
+header{
+  padding:15px 20px;
+  background:#111a2c;
+  color:#d4af37;
+  font-size:20px;
+  font-weight:700;
+}
+
+/* MAIN LAYOUT */
+.wrapper{
+  display:flex;
+  height:92vh;
+}
+
+/* LEFT - SESSION LIST */
+.left{
+  width:25%;
+  border-right:1px solid #222;
   overflow-y:auto;
-}
-
-#right{
-  flex:1;
-  display:flex;
-  flex-direction:column;
+  background:#0e1628;
 }
 
 .session{
   padding:15px;
-  border-bottom:1px solid #222;
+  border-bottom:1px solid #1f2a44;
   cursor:pointer;
+  transition:0.2s;
 }
 
 .session:hover{
@@ -38,128 +47,201 @@ body{
 }
 
 .session.active{
-  background:#d4af37;
-  color:#111;
+  background:#1a2742;
+  border-left:4px solid #d4af37;
 }
 
-#messages{
+.session small{
+  display:block;
+  color:#aaa;
+  margin-top:5px;
+}
+
+/* CENTER - CHAT */
+.center{
+  width:50%;
+  display:flex;
+  flex-direction:column;
+}
+
+.chatBox{
   flex:1;
   padding:15px;
   overflow-y:auto;
+  background:#111a2c;
 }
 
 .msg{
-  margin-bottom:10px;
+  margin:10px 0;
+  line-height:1.4;
 }
 
-.msg b{
-  color:#d4af37;
+.user{ color:#fff; }
+.bot{ color:#d4af37; }
+.admin{ color:#4fc3f7; }
+
+/* INPUT */
+.inputBox{
+  display:flex;
+  border-top:1px solid #222;
 }
 
-#topbar{
-  padding:10px;
+.inputBox input{
+  flex:1;
+  padding:15px;
+  border:none;
+  outline:none;
+  background:#0b1220;
+  color:#fff;
+}
+
+.inputBox button{
+  padding:0 20px;
+  background:#d4af37;
+  border:none;
+  font-weight:700;
+  cursor:pointer;
+}
+
+/* RIGHT - INFO PANEL */
+.right{
+  width:25%;
+  border-left:1px solid #222;
+  background:#0e1628;
+  padding:15px;
+}
+
+.infoBox{
   background:#111a2c;
-  border-bottom:1px solid #333;
+  padding:15px;
+  border-radius:10px;
+  margin-bottom:15px;
+}
+
+.badge{
+  display:inline-block;
+  padding:5px 10px;
+  background:#1f2a44;
+  border-radius:20px;
+  font-size:12px;
+  margin-top:5px;
 }
 </style>
 </head>
 
 <body>
 
-<div id="left"></div>
+<header>관리자 상담 패널 (멀티 고객 관리)</header>
 
-<div id="right">
-  <div id="topbar">💬 관리자 상담 패널</div>
-  <div id="messages"></div>
+<div class="wrapper">
+
+  <!-- LEFT -->
+  <div class="left" id="sessionList"></div>
+
+  <!-- CENTER -->
+  <div class="center">
+
+    <div class="chatBox" id="chatBox">
+      고객을 선택하세요
+    </div>
+
+    <div class="inputBox">
+      <input id="msgInput" placeholder="답장 입력">
+      <button onclick="sendMsg()">전송</button>
+    </div>
+
+  </div>
+
+  <!-- RIGHT -->
+  <div class="right">
+    <div class="infoBox">
+      <h3>고객 정보</h3>
+      <div id="info">선택된 고객 없음</div>
+    </div>
+  </div>
+
 </div>
 
 <script>
 const API = "https://waterbridge-chat-server-production.up.railway.app";
 
 let currentSession = null;
-let activeSessionEl = null;
 
-/* ================= 세션 로드 ================= */
-async function loadSessions(){
-  const res = await fetch(API + "/admin");
+// ================= LOAD SESSIONS =================
+async function loadSessions() {
+  const res = await fetch(API + "/sessions");
   const data = await res.json();
 
-  const left = document.getElementById("left");
-  left.innerHTML = "";
+  const box = document.getElementById("sessionList");
+  box.innerHTML = "";
 
   data.forEach(s => {
     const div = document.createElement("div");
-    div.className = "session";
+    div.className = "session" + (s.sessionId === currentSession ? " active" : "");
 
-    const title = document.createElement("div");
-    const bold = document.createElement("b");
-    bold.textContent = s.sessionId;
+    div.innerHTML = `
+      <b>${s.sessionId}</b>
+      <small>${s.lastMessage || "메시지 없음"}</small>
+    `;
 
-    const small = document.createElement("small");
-    small.textContent = s.lastMessage || "No message";
+    div.onclick = () => openChat(s.sessionId, s.lastMessage);
 
-    title.appendChild(bold);
-    div.appendChild(title);
-    div.appendChild(small);
-
-    div.onclick = () => {
-
-      // active 유지
-      if (activeSessionEl) {
-        activeSessionEl.classList.remove("active");
-      }
-
-      div.classList.add("active");
-      activeSessionEl = div;
-
-      openSession(s.sessionId);
-    };
-
-    left.appendChild(div);
+    box.appendChild(div);
   });
 }
 
-/* ================= 메시지 로드 ================= */
-async function openSession(sessionId){
+// ================= OPEN CHAT =================
+async function openChat(sessionId, lastMessage) {
   currentSession = sessionId;
 
-  const res = await fetch(API + "/admin/messages/" + sessionId);
+  const res = await fetch(API + "/messages/" + sessionId);
   const data = await res.json();
 
-  const box = document.getElementById("messages");
+  const box = document.getElementById("chatBox");
   box.innerHTML = "";
 
   data.forEach(m => {
     const div = document.createElement("div");
-    div.className = "msg";
-
-    const sender = document.createElement("b");
-    sender.textContent = m.from;
-
-    const text = document.createElement("span");
-    text.textContent = " : " + m.text;
-
-    div.appendChild(sender);
-    div.appendChild(text);
-
+    div.className = "msg " + m.from;
+    div.innerHTML = `<b>${m.from}</b>: ${m.text}`;
     box.appendChild(div);
   });
 
-  box.scrollTop = box.scrollHeight;
+  document.getElementById("info").innerHTML = `
+    <b>Session:</b> ${sessionId}<br>
+    <span class="badge">활성 채팅</span><br><br>
+    <b>최근 메시지:</b><br>
+    ${lastMessage || "-"}
+  `;
+
+  loadSessions();
 }
 
-/* ================= 자동 새로고침 ================= */
+// ================= SEND MESSAGE =================
+async function sendMsg() {
+  const input = document.getElementById("msgInput");
+  const text = input.value.trim();
+  if (!text || !currentSession) return;
 
-// 세션 목록만 5초마다 갱신
-setInterval(loadSessions, 5000);
+  await fetch(API + "/messages/" + currentSession, {
+    method: "POST",
+    headers: {"Content-Type":"application/json"},
+    body: JSON.stringify({
+      sessionId: currentSession,
+      text,
+      from: "admin"
+    })
+  });
 
-// 현재 채팅방만 2초마다 갱신
-setInterval(() => {
-  if (currentSession) {
-    openSession(currentSession);
-  }
-}, 2000);
+  input.value = "";
+  openChat(currentSession);
+}
 
-/* init */
+// ================= AUTO REFRESH =================
+setInterval(loadSessions, 3000);
+
 loadSessions();
 </script>
+
+</body>
+</html>

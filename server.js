@@ -24,6 +24,7 @@ app.get("/", (req, res) => {
 
 /* ================= DB ================= */
 const MONGO_URL = process.env.MONGO_URL;
+
 if (!MONGO_URL) {
   console.error("❌ MONGO_URL 없음");
   process.exit(1);
@@ -45,7 +46,7 @@ const Message = mongoose.model("Message", new mongoose.Schema({
 }));
 
 const Session = mongoose.model("Session", new mongoose.Schema({
-  sessionId: { type: String, unique: true },
+  sessionId: { type: String, unique: true, index: true },
   status: { type: String, default: "open" },
   lastMessage: String,
   updatedAt: { type: Date, default: Date.now }
@@ -63,9 +64,8 @@ io.on("connection", (socket) => {
 
   socket.on("message", async (data) => {
     try {
-      if (!data?.sessionId || !data?.text) return;
-
       const { sessionId, text, from } = data;
+      if (!sessionId || !text) return;
 
       // 1. 메시지 저장
       const msg = await Message.create({
@@ -74,21 +74,23 @@ io.on("connection", (socket) => {
         text
       });
 
-      // 2. 세션 업데이트
+      // 2. 세션 업데이트 (안정화 upsert)
       await Session.findOneAndUpdate(
         { sessionId },
         {
-          sessionId,
-          lastMessage: text,
-          updatedAt: new Date()
+          $set: {
+            sessionId,
+            lastMessage: text,
+            updatedAt: new Date()
+          }
         },
         { upsert: true, new: true }
       );
 
-      // 3. 실시간 전송
+      // 3. 실시간 전송 (고객 + 관리자 모두)
       io.to(sessionId).emit("message", msg);
 
-      // 4. AI 응답
+      // 4. AI 응답 (고객 메시지일 때만)
       if (from === "user") {
         setTimeout(async () => {
           const aiText = aiEngine(text);
@@ -102,8 +104,10 @@ io.on("connection", (socket) => {
           await Session.findOneAndUpdate(
             { sessionId },
             {
-              lastMessage: aiText,
-              updatedAt: new Date()
+              $set: {
+                lastMessage: aiText,
+                updatedAt: new Date()
+              }
             }
           );
 
@@ -140,13 +144,12 @@ app.get("/health", (req, res) => {
   res.json({ ok: true });
 });
 
-/* 🔥 세션 리스트 (관리자용) */
+/* ================= ADMIN API ================= */
 app.get("/admin/sessions", async (req, res) => {
   const list = await Session.find().sort({ updatedAt: -1 });
   res.json(list);
 });
 
-/* 🔥 메시지 리스트 */
 app.get("/admin/messages/:sessionId", async (req, res) => {
   const msgs = await Message.find({ sessionId: req.params.sessionId })
     .sort({ createdAt: 1 });
@@ -154,7 +157,36 @@ app.get("/admin/messages/:sessionId", async (req, res) => {
   res.json(msgs);
 });
 
-/* 세션 종료 */
+/* ================= ADMIN SEND MESSAGE (🔥 추가 핵심) ================= */
+app.post("/admin/message", async (req, res) => {
+  const { sessionId, text } = req.body;
+
+  if (!sessionId || !text) {
+    return res.status(400).json({ error: "missing data" });
+  }
+
+  const msg = await Message.create({
+    sessionId,
+    from: "admin",
+    text
+  });
+
+  await Session.findOneAndUpdate(
+    { sessionId },
+    {
+      $set: {
+        lastMessage: text,
+        updatedAt: new Date()
+      }
+    }
+  );
+
+  io.to(sessionId).emit("message", msg);
+
+  res.json({ ok: true });
+});
+
+/* ================= CLOSE SESSION ================= */
 app.post("/close", async (req, res) => {
   const { sessionId } = req.body;
 
