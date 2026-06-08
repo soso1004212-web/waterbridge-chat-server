@@ -148,7 +148,7 @@ socket.emit("adminJoin");
 let currentSession = null;
 
 // ================= SOCKET (실시간) =================
-socket.on("newMessage", (msg) => {
+socket.on("message", (msg) => {
   if (msg.sessionId !== currentSession) return;
 
   addMessage(msg);
@@ -215,38 +215,12 @@ async function sendMsg() {
   const input = document.getElementById("msgInput");
   const text = input.value.trim();
 
-  if (!text) {
-    alert("메시지를 입력하세요");
-    return;
-  }
+  if (!text || !currentSession) return;
 
-  if (!currentSession) {
-    alert("고객을 먼저 선택하세요");
-    return;
-  }
+  socket.emit("adminMessage", {
+    sessionId: currentSession,
+    text: text
+  });
 
-  try {
-    const res = await fetch(API + "/messages/" + currentSession, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json"
-      },
-      body: JSON.stringify({
-        text,
-        from: "admin"
-      })
-    });
-
-    console.log("응답코드:", res.status);
-
-    if (!res.ok) {
-      alert("전송 실패: " + res.status);
-      return;
-    }
-
-    input.value = "";
-  } catch (err) {
-    console.error(err);
-    alert(err.message);
-  }
+  input.value = "";
 }
