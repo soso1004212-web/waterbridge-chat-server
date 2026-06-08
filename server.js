@@ -12,13 +12,17 @@ app.use(cors({ origin: "*" }));
 app.use(express.json());
 
 const io = new Server(server, {
-  cors: { origin: "*" }
+  cors: { origin: "*" },
+  pingTimeout: 60000,
 });
 
-// ================= DB =================
-mongoose.connect(process.env.MONGO_URI);
+// ================== DB CHECK ==================
+if (!process.env.MONGO_URI) {
+  console.error("❌ MONGO_URI is missing");
+  process.exit(1);
+}
 
-// ================= MODEL =================
+// ================== MODEL ==================
 const MessageSchema = new mongoose.Schema({
   sessionId: String,
   text: String,
@@ -28,67 +32,106 @@ const MessageSchema = new mongoose.Schema({
 
 const Message = mongoose.model("Message", MessageSchema);
 
-// ================= SOCKET =================
+// ================== SOCKET ==================
 io.on("connection", (socket) => {
   console.log("connected:", socket.id);
 
-  // 세션 참여
-  socket.on("join", (sessionId) => {
+  socket.on("join", async (sessionId) => {
     socket.join(sessionId);
+
+    // 🔥 채팅 히스토리 복구 (끊겨도 복구됨)
+    const history = await Message.find({ sessionId })
+      .sort({ createdAt: 1 })
+      .limit(100);
+
+    socket.emit("history", history);
   });
 
-  // 관리자 입장
   socket.on("adminJoin", () => {
     socket.join("admin");
   });
 
   // ================= USER MESSAGE =================
   socket.on("message", async (data) => {
-    const msg = await Message.create({
-      sessionId: data.sessionId,
-      text: data.text,
-      from: data.from || "user"
-    });
+    try {
+      const msg = await Message.create({
+        sessionId: data.sessionId,
+        text: data.text,
+        from: data.from || "user"
+      });
 
-    // 🔥 해당 세션 + 관리자 모두 전달
-    io.to(data.sessionId).emit("message", msg);
-    io.to("admin").emit("message", msg);
+      io.to(data.sessionId).emit("message", msg);
+      io.to("admin").emit("message", msg);
+    } catch (err) {
+      console.error("message error:", err);
+    }
   });
 
   // ================= ADMIN MESSAGE =================
   socket.on("adminMessage", async (data) => {
-    const msg = await Message.create({
-      sessionId: data.sessionId,
-      text: data.text,
-      from: "admin"
-    });
+    try {
+      const msg = await Message.create({
+        sessionId: data.sessionId,
+        text: data.text,
+        from: "admin"
+      });
 
-    io.to(data.sessionId).emit("message", msg);
-    io.to("admin").emit("message", msg);
+      io.to(data.sessionId).emit("message", msg);
+      io.to("admin").emit("message", msg);
+    } catch (err) {
+      console.error("adminMessage error:", err);
+    }
+  });
+
+  socket.on("disconnect", () => {
+    console.log("disconnected:", socket.id);
   });
 });
 
-// ================= REST =================
+// ================== API ==================
 app.get("/admin/messages/:sessionId", async (req, res) => {
-  const data = await Message.find({ sessionId: req.params.sessionId });
+  const data = await Message.find({ sessionId: req.params.sessionId })
+    .sort({ createdAt: 1 });
+
   res.json(data);
 });
 
 app.get("/admin/sessions", async (req, res) => {
-  const messages = await Message.find();
+  const messages = await Message.find().sort({ createdAt: -1 });
 
   const sessions = {};
   messages.forEach(m => {
-    sessions[m.sessionId] = {
-      sessionId: m.sessionId,
-      lastMessage: m.text
-    };
+    if (!sessions[m.sessionId]) {
+      sessions[m.sessionId] = {
+        sessionId: m.sessionId,
+        lastMessage: m.text,
+        updatedAt: m.createdAt
+      };
+    }
   });
 
   res.json(Object.values(sessions));
 });
 
-// ================= START =================
-server.listen(process.env.PORT || 3000, () => {
-  console.log("server running");
-});
+// ================== START (안정형) ==================
+async function start() {
+  try {
+    await mongoose.connect(process.env.MONGO_URI, {
+      maxPoolSize: 10,
+      serverSelectionTimeoutMS: 5000,
+      socketTimeoutMS: 45000
+    });
+
+    console.log("✅ MongoDB connected");
+
+    server.listen(process.env.PORT || 3000, () => {
+      console.log("🚀 server running");
+    });
+
+  } catch (err) {
+    console.error("❌ MongoDB connection failed:", err);
+    process.exit(1);
+  }
+}
+
+start();
