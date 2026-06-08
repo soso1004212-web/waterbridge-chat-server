@@ -17,37 +17,35 @@ const io = new Server(server, {
   pingTimeout: 60000,
 });
 
-/* ================= ROOT ROUTE (핵심 추가) ================= */
+/* ================= ROOT ================= */
 app.get("/", (req, res) => {
   res.send("워터브릿지 채팅 서버 정상 작동 🚀");
 });
 
-/* ================= SAFE ENV CHECK ================= */
+/* ================= DB ================= */
 const MONGO_URL = process.env.MONGO_URL;
-
 if (!MONGO_URL) {
-  console.error("❌ MONGO_URL 없음 (Railway Variables 확인)");
+  console.error("❌ MONGO_URL 없음");
   process.exit(1);
 }
 
-/* ================= DB CONNECT ================= */
 mongoose.connect(MONGO_URL)
   .then(() => console.log("🟢 MongoDB 연결 성공"))
   .catch(err => {
-    console.error("🔴 MongoDB 연결 실패:", err.message);
+    console.error("🔴 MongoDB 오류:", err.message);
     process.exit(1);
   });
 
 /* ================= MODELS ================= */
 const Message = mongoose.model("Message", new mongoose.Schema({
-  sessionId: String,
+  sessionId: { type: String, index: true },
   from: String,
   text: String,
   createdAt: { type: Date, default: Date.now }
 }));
 
 const Session = mongoose.model("Session", new mongoose.Schema({
-  sessionId: String,
+  sessionId: { type: String, unique: true },
   status: { type: String, default: "open" },
   lastMessage: String,
   updatedAt: { type: Date, default: Date.now }
@@ -55,6 +53,7 @@ const Session = mongoose.model("Session", new mongoose.Schema({
 
 /* ================= SOCKET ================= */
 io.on("connection", (socket) => {
+
   console.log("🟢 socket connected");
 
   socket.on("join", (sessionId) => {
@@ -64,19 +63,32 @@ io.on("connection", (socket) => {
 
   socket.on("message", async (data) => {
     try {
+      if (!data?.sessionId || !data?.text) return;
+
       const { sessionId, text, from } = data;
-      if (!sessionId || !text) return;
 
-      const msg = await Message.create({ sessionId, from, text });
+      // 1. 메시지 저장
+      const msg = await Message.create({
+        sessionId,
+        from,
+        text
+      });
 
+      // 2. 세션 업데이트
       await Session.findOneAndUpdate(
         { sessionId },
-        { sessionId, lastMessage: text, updatedAt: new Date() },
-        { upsert: true }
+        {
+          sessionId,
+          lastMessage: text,
+          updatedAt: new Date()
+        },
+        { upsert: true, new: true }
       );
 
+      // 3. 실시간 전송
       io.to(sessionId).emit("message", msg);
 
+      // 4. AI 응답
       if (from === "user") {
         setTimeout(async () => {
           const aiText = aiEngine(text);
@@ -86,6 +98,14 @@ io.on("connection", (socket) => {
             from: "bot",
             text: aiText
           });
+
+          await Session.findOneAndUpdate(
+            { sessionId },
+            {
+              lastMessage: aiText,
+              updatedAt: new Date()
+            }
+          );
 
           io.to(sessionId).emit("message", aiMsg);
         }, 600);
@@ -102,7 +122,7 @@ io.on("connection", (socket) => {
 });
 
 /* ================= AI ================= */
-function aiEngine(text) {
+function aiEngine(text = "") {
   text = text.toLowerCase();
 
   if (text.includes("m&a")) return "M&A 전문 상담 가능합니다.";
@@ -114,34 +134,45 @@ function aiEngine(text) {
 }
 
 /* ================= API ================= */
+
+// health check
 app.get("/health", (req, res) => {
   res.json({ ok: true });
 });
 
-app.get("/sessions", async (req, res) => {
+/* 🔥 세션 리스트 (관리자용) */
+app.get("/admin/sessions", async (req, res) => {
   const list = await Session.find().sort({ updatedAt: -1 });
   res.json(list);
 });
 
-app.get("/messages/:sessionId", async (req, res) => {
-  const msgs = await Message.find({ sessionId: req.params.sessionId });
+/* 🔥 메시지 리스트 */
+app.get("/admin/messages/:sessionId", async (req, res) => {
+  const msgs = await Message.find({ sessionId: req.params.sessionId })
+    .sort({ createdAt: 1 });
+
   res.json(msgs);
 });
 
+/* 세션 종료 */
 app.post("/close", async (req, res) => {
   const { sessionId } = req.body;
-  await Session.updateOne({ sessionId }, { status: "closed" });
+
+  await Session.updateOne(
+    { sessionId },
+    { status: "closed" }
+  );
+
   res.json({ ok: true });
 });
 
-/* ================= ADMIN PAGE (수정됨) ================= */
+/* ================= ADMIN PAGE ================= */
 app.get("/admin", (req, res) => {
   res.sendFile(path.join(__dirname, "public", "admin.html"));
 });
 
 /* ================= START ================= */
 const PORT = process.env.PORT || 3000;
-
 server.listen(PORT, () => {
   console.log("🚀 Server running on port", PORT);
 });

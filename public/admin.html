@@ -77,6 +77,7 @@ body{
 const API = "https://waterbridge-chat-server-production.up.railway.app";
 
 let currentSession = null;
+let activeSessionEl = null;
 
 /* ================= 세션 로드 ================= */
 async function loadSessions(){
@@ -89,14 +90,28 @@ async function loadSessions(){
   data.forEach(s => {
     const div = document.createElement("div");
     div.className = "session";
-    div.innerHTML = `
-      <div><b>${s.sessionId}</b></div>
-      <small>${s.lastMessage || "No message"}</small>
-    `;
+
+    const title = document.createElement("div");
+    const bold = document.createElement("b");
+    bold.textContent = s.sessionId;
+
+    const small = document.createElement("small");
+    small.textContent = s.lastMessage || "No message";
+
+    title.appendChild(bold);
+    div.appendChild(title);
+    div.appendChild(small);
 
     div.onclick = () => {
-      document.querySelectorAll(".session").forEach(el => el.classList.remove("active"));
+
+      // active 유지
+      if (activeSessionEl) {
+        activeSessionEl.classList.remove("active");
+      }
+
       div.classList.add("active");
+      activeSessionEl = div;
+
       openSession(s.sessionId);
     };
 
@@ -118,9 +133,14 @@ async function openSession(sessionId){
     const div = document.createElement("div");
     div.className = "msg";
 
-    div.innerHTML = `
-      <b>${m.from}</b> : ${m.text}
-    `;
+    const sender = document.createElement("b");
+    sender.textContent = m.from;
+
+    const text = document.createElement("span");
+    text.textContent = " : " + m.text;
+
+    div.appendChild(sender);
+    div.appendChild(text);
 
     box.appendChild(div);
   });
@@ -129,17 +149,17 @@ async function openSession(sessionId){
 }
 
 /* ================= 자동 새로고침 ================= */
-setInterval(() => {
-  loadSessions();
 
+// 세션 목록만 5초마다 갱신
+setInterval(loadSessions, 5000);
+
+// 현재 채팅방만 2초마다 갱신
+setInterval(() => {
   if (currentSession) {
     openSession(currentSession);
   }
-}, 3000);
+}, 2000);
 
 /* init */
 loadSessions();
 </script>
-
-</body>
-</html>
