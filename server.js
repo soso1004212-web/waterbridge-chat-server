@@ -74,7 +74,7 @@ io.on("connection", (socket) => {
         text
       });
 
-      // 2. 세션 업데이트 (안정화 upsert)
+      // 2. 세션 업데이트
       await Session.findOneAndUpdate(
         { sessionId },
         {
@@ -84,13 +84,13 @@ io.on("connection", (socket) => {
             updatedAt: new Date()
           }
         },
-        { upsert: true, new: true }
+        { upsert: true }
       );
 
-      // 3. 실시간 전송 (고객 + 관리자 모두)
+      // 3. 실시간 전달 (고객 + 관리자)
       io.to(sessionId).emit("message", msg);
 
-      // 4. AI 응답 (고객 메시지일 때만)
+      // 4. AI 응답
       if (from === "user") {
         setTimeout(async () => {
           const aiText = aiEngine(text);
@@ -120,9 +120,6 @@ io.on("connection", (socket) => {
     }
   });
 
-  socket.on("disconnect", () => {
-    console.log("🔴 socket disconnected");
-  });
 });
 
 /* ================= AI ================= */
@@ -139,17 +136,20 @@ function aiEngine(text = "") {
 
 /* ================= API ================= */
 
-// health check
+// health
 app.get("/health", (req, res) => {
   res.json({ ok: true });
 });
 
 /* ================= ADMIN API ================= */
+
+// 🔥 세션 리스트
 app.get("/admin/sessions", async (req, res) => {
   const list = await Session.find().sort({ updatedAt: -1 });
   res.json(list);
 });
 
+// 🔥 메시지 리스트
 app.get("/admin/messages/:sessionId", async (req, res) => {
   const msgs = await Message.find({ sessionId: req.params.sessionId })
     .sort({ createdAt: 1 });
@@ -157,7 +157,7 @@ app.get("/admin/messages/:sessionId", async (req, res) => {
   res.json(msgs);
 });
 
-/* ================= ADMIN SEND MESSAGE (🔥 추가 핵심) ================= */
+// 🔥 관리자 메시지 전송
 app.post("/admin/message", async (req, res) => {
   const { sessionId, text } = req.body;
 
@@ -186,7 +186,7 @@ app.post("/admin/message", async (req, res) => {
   res.json({ ok: true });
 });
 
-/* ================= CLOSE SESSION ================= */
+/* ================= CLOSE ================= */
 app.post("/close", async (req, res) => {
   const { sessionId } = req.body;
 

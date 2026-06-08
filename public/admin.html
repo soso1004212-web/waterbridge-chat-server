@@ -4,6 +4,8 @@
 <meta charset="UTF-8">
 <title>관리자 상담 패널</title>
 
+<script src="/socket.io/socket.io.js"></script>
+
 <style>
 body{
   margin:0;
@@ -12,7 +14,6 @@ body{
   color:#fff;
 }
 
-/* HEADER */
 header{
   padding:15px 20px;
   background:#111a2c;
@@ -21,13 +22,11 @@ header{
   font-weight:700;
 }
 
-/* MAIN LAYOUT */
 .wrapper{
   display:flex;
   height:92vh;
 }
 
-/* LEFT - SESSION LIST */
 .left{
   width:25%;
   border-right:1px solid #222;
@@ -39,7 +38,6 @@ header{
   padding:15px;
   border-bottom:1px solid #1f2a44;
   cursor:pointer;
-  transition:0.2s;
 }
 
 .session:hover{
@@ -57,7 +55,6 @@ header{
   margin-top:5px;
 }
 
-/* CENTER - CHAT */
 .center{
   width:50%;
   display:flex;
@@ -73,14 +70,12 @@ header{
 
 .msg{
   margin:10px 0;
-  line-height:1.4;
 }
 
 .user{ color:#fff; }
-.bot{ color:#d4af37; }
 .admin{ color:#4fc3f7; }
+.bot{ color:#d4af37; }
 
-/* INPUT */
 .inputBox{
   display:flex;
   border-top:1px solid #222;
@@ -103,7 +98,6 @@ header{
   cursor:pointer;
 }
 
-/* RIGHT - INFO PANEL */
 .right{
   width:25%;
   border-left:1px solid #222;
@@ -115,48 +109,31 @@ header{
   background:#111a2c;
   padding:15px;
   border-radius:10px;
-  margin-bottom:15px;
-}
-
-.badge{
-  display:inline-block;
-  padding:5px 10px;
-  background:#1f2a44;
-  border-radius:20px;
-  font-size:12px;
-  margin-top:5px;
 }
 </style>
 </head>
 
 <body>
 
-<header>관리자 상담 패널 (멀티 고객 관리)</header>
+<header>관리자 상담 패널</header>
 
 <div class="wrapper">
 
-  <!-- LEFT -->
   <div class="left" id="sessionList"></div>
 
-  <!-- CENTER -->
   <div class="center">
-
-    <div class="chatBox" id="chatBox">
-      고객을 선택하세요
-    </div>
+    <div class="chatBox" id="chatBox">고객을 선택하세요</div>
 
     <div class="inputBox">
       <input id="msgInput" placeholder="답장 입력">
       <button onclick="sendMsg()">전송</button>
     </div>
-
   </div>
 
-  <!-- RIGHT -->
   <div class="right">
     <div class="infoBox">
       <h3>고객 정보</h3>
-      <div id="info">선택된 고객 없음</div>
+      <div id="info">없음</div>
     </div>
   </div>
 
@@ -165,11 +142,21 @@ header{
 <script>
 const API = "https://waterbridge-chat-server-production.up.railway.app";
 
+const socket = io();
+socket.emit("adminJoin");
+
 let currentSession = null;
+
+// ================= SOCKET (실시간) =================
+socket.on("newMessage", (msg) => {
+  if (msg.sessionId !== currentSession) return;
+
+  addMessage(msg);
+});
 
 // ================= LOAD SESSIONS =================
 async function loadSessions() {
-  const res = await fetch(API + "/sessions");
+  const res = await fetch(API + "/admin/sessions");
   const data = await res.json();
 
   const box = document.getElementById("sessionList");
@@ -181,7 +168,7 @@ async function loadSessions() {
 
     div.innerHTML = `
       <b>${s.sessionId}</b>
-      <small>${s.lastMessage || "메시지 없음"}</small>
+      <small>${s.lastMessage || ""}</small>
     `;
 
     div.onclick = () => openChat(s.sessionId, s.lastMessage);
@@ -194,30 +181,36 @@ async function loadSessions() {
 async function openChat(sessionId, lastMessage) {
   currentSession = sessionId;
 
-  const res = await fetch(API + "/messages/" + sessionId);
+  const res = await fetch(API + "/admin/messages/" + sessionId);
   const data = await res.json();
 
   const box = document.getElementById("chatBox");
   box.innerHTML = "";
 
-  data.forEach(m => {
-    const div = document.createElement("div");
-    div.className = "msg " + m.from;
-    div.innerHTML = `<b>${m.from}</b>: ${m.text}`;
-    box.appendChild(div);
-  });
+  data.forEach(addMessage);
 
   document.getElementById("info").innerHTML = `
     <b>Session:</b> ${sessionId}<br>
-    <span class="badge">활성 채팅</span><br><br>
-    <b>최근 메시지:</b><br>
-    ${lastMessage || "-"}
+    <b>최근:</b> ${lastMessage || "-"}
   `;
 
   loadSessions();
 }
 
-// ================= SEND MESSAGE =================
+// ================= MESSAGE RENDER =================
+function addMessage(m) {
+  const box = document.getElementById("chatBox");
+
+  const div = document.createElement("div");
+  div.className = "msg " + m.from;
+
+  div.innerHTML = `<b>${m.from}</b>: ${m.text}`;
+
+  box.appendChild(div);
+  box.scrollTop = box.scrollHeight;
+}
+
+// ================= SEND =================
 async function sendMsg() {
   const input = document.getElementById("msgInput");
   const text = input.value.trim();
@@ -227,19 +220,15 @@ async function sendMsg() {
     method: "POST",
     headers: {"Content-Type":"application/json"},
     body: JSON.stringify({
-      sessionId: currentSession,
       text,
       from: "admin"
     })
   });
 
   input.value = "";
-  openChat(currentSession);
 }
 
-// ================= AUTO REFRESH =================
 setInterval(loadSessions, 3000);
-
 loadSessions();
 </script>
 
