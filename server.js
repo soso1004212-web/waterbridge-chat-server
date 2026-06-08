@@ -38,17 +38,19 @@ io.on("connection", (socket) => {
 
   // USER JOIN
   socket.on("user:join", async (sessionId) => {
-    if (!sessionId) return;
+  if (!sessionId) return;
 
-    socket.data.sessionId = sessionId;
+  socket.data.sessionId = sessionId;
 
-    socket.join(`session:${sessionId}`);
+  socket.join(`session:${sessionId}`);
 
-    io.to("admins").emit("admin:user_online", { sessionId });
+  console.log("USER JOIN:", sessionId);
 
-    const history = await Message.find({ sessionId }).sort({ createdAt: 1 });
-    socket.emit("chat:history", history);
-  });
+  const history = await Message.find({ sessionId }).sort({ createdAt: 1 });
+  socket.emit("chat:history", history);
+
+  io.to("admins").emit("admin:user_online", { sessionId });
+});
 
   // ADMIN JOIN
   socket.on("admin:join", () => {
@@ -56,19 +58,21 @@ io.on("connection", (socket) => {
   });
 
   // ADMIN WATCH (정리된 구조)
-  socket.on("admin:watch", (sessionId) => {
-    if (!sessionId) return;
+ socket.on("admin:watch", (sessionId) => {
+  if (!sessionId) return;
 
-    // 기존 room 제거 (중요)
-    for (const room of socket.rooms) {
-      if (room.startsWith("session:")) {
-        socket.leave(room);
-      }
+  // 기존 session room 제거
+  for (const room of socket.rooms) {
+    if (room !== socket.id && room.startsWith("session:")) {
+      socket.leave(room);
     }
+  }
 
-    socket.join(`session:${sessionId}`);
-    socket.data.watchSession = sessionId;
-  });
+  socket.join(`session:${sessionId}`);
+  socket.data.watchSession = sessionId;
+
+  console.log("ADMIN WATCH:", sessionId);
+});
 
   // USER MESSAGE
   socket.on("user:message", async ({ sessionId, text }) => {
