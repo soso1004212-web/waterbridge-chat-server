@@ -127,6 +127,20 @@ app.get("/admin/sessions", async (req, res) => {
 
   res.json(Object.values(sessions));
 });
+app.delete("/admin/session/:sessionId", async (req, res) => {
+  try {
+    const { sessionId } = req.params;
+
+    await Message.deleteMany({ sessionId });
+    await Session.deleteOne({ sessionId }); // Session 모델 없으면 이 줄 삭제
+
+    res.json({ ok: true });
+
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ ok: false });
+  }
+});
 
 // ================== START ==================
 async function start() {
